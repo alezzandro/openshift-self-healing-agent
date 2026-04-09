@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: knowledge-base-mcp
+  namespace: self-healing-agent
+  labels:
+    app: knowledge-base-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: knowledge-base-mcp
+  template:
+    metadata:
+      labels:
+        app: knowledge-base-mcp
+    spec:
+      containers:
+        - name: knowledge-base-mcp
+          image: image-registry.openshift-image-registry.svc:5000/self-healing-agent/knowledge-base-mcp:latest
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          env:
+            - name: LLAMASTACK_URL
+              value: "http://self-healing-agent-service.rhoai-project.svc.cluster.local:8321"
+            - name: VECTOR_STORE_NAME
+              value: "ops-knowledge-base"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: knowledge-base-mcp
+  namespace: self-healing-agent
+  labels:
+    app: knowledge-base-mcp
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app: knowledge-base-mcp

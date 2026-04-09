@@ -15,6 +15,7 @@
         alert_namespace: "{{ alert_namespace | default('') }}"
         alert_node: "{{ alert_node | default('') }}"
         alert_operator_name: "{{ alert_operator_name | default('') }}"
+        alert_mcp_name: "{{ alert_mcp_name | default('') }}"
         diagnostics: "{{ diagnostics | default({}) }}"
         snow_incident_number: "{{ snow_incident_number | default('') }}"
         snow_instance_url: "{{ snow_instance_url | default('') }}"
@@ -27,9 +28,18 @@
         aap_controller_username: "{{ aap_controller_username | default('admin') }}"
         aap_controller_password: "{{ aap_controller_password | default('') }}"
 
+    - name: Derive alert qualifier for resource-specific naming
+      ansible.builtin.set_fact:
+        alert_qualifier: >-
+          {{ alert_operator_name if (alert_operator_name | default('')) | length > 0
+             else (alert_mcp_name if (alert_mcp_name | default('')) | length > 0
+             else '') }}
+
     - name: Build safe playbook filename
       ansible.builtin.set_fact:
-        playbook_filename: "remediate-{{ alert_name | lower | regex_replace('[^a-z0-9]', '-') }}.yml"
+        playbook_filename: >-
+          remediate-{{ (alert_name + ('-' + alert_qualifier if alert_qualifier | trim | length > 0 else ''))
+            | lower | regex_replace('[^a-z0-9]', '-') }}.yml
 
     - name: Render system prompt for new incident
       ansible.builtin.template:
@@ -99,6 +109,64 @@
           (No additional documentation retrieved from OpenShift Lightspeed.)
           {% endif %}
 
+    # ── Step 0.7: RAG — search operational knowledge base (LlamaStack vector store) ──
+
+    - name: Read knowledge base vector store ID from ConfigMap
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: ConfigMap
+        name: "{{ llamastack_kb_configmap_name }}"
+        namespace: "{{ llamastack_kb_configmap_namespace }}"
+      register: kb_configmap_lookup
+
+    - name: Extract knowledge base vector store ID
+      ansible.builtin.set_fact:
+        kb_vector_store_id: "{{ kb_configmap_lookup.resources[0].data.vector_store_id | default('') }}"
+      when: kb_configmap_lookup.resources | length > 0
+
+    - name: Search operational knowledge base for relevant runbooks and references
+      ansible.builtin.uri:
+        url: "{{ llamastack_url }}/v1/vector_stores/{{ kb_vector_store_id }}/search"
+        method: POST
+        body_format: json
+        body:
+          query: >-
+            {{ alert_name }} {{ alert_description }}
+            {% if alert_operator_name | default('') | length > 0 %}operator {{ alert_operator_name }}{% endif %}
+            {% if alert_mcp_name | default('') | length > 0 %}MachineConfigPool {{ alert_mcp_name }}{% endif %}
+            remediation runbook Ansible playbook
+          max_num_results: "{{ llamastack_kb_top_k }}"
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+        timeout: 30
+        status_code: [200]
+      register: kb_search_result
+      when: kb_vector_store_id | default('') | length > 0
+      ignore_errors: true
+
+    - name: Build knowledge base context from search results
+      ansible.builtin.set_fact:
+        kb_context: >-
+          {% if kb_search_result is succeeded and kb_search_result.json.data | default([]) | length > 0 %}
+          OPERATIONAL KNOWLEDGE BASE (retrieved from ops-knowledge-base vector store, {{ kb_search_result.json.data | length }} documents):
+
+          {% for doc in kb_search_result.json.data %}
+          --- {{ doc.filename | default('document') }} (relevance: {{ '%.2f' | format(doc.score | float) }}) ---
+          {% for chunk in doc.content | default([]) %}
+          {{ chunk.text | default('') }}
+          {% endfor %}
+
+          {% endfor %}
+          {% else %}
+          (No operational knowledge base documents retrieved.)
+          {% endif %}
+
+    - name: Set empty KB context if search was skipped
+      ansible.builtin.set_fact:
+        kb_context: "(No operational knowledge base configured.)"
+      when: kb_context is not defined
+
     # ── Step 1: Call AI for RCA + Playbook generation ──
 
     - name: Call LlamaStack Chat Completions API for RCA and playbook
@@ -113,6 +181,8 @@
               content: "{{ system_prompt_content.content | b64decode }}"
             - role: user
               content: >-
+                {{ kb_context }}
+
                 {{ rag_context }}
 
                 Analyze this alert and respond with ALL THREE sections.
@@ -330,9 +400,9 @@
         body:
           work_notes: |
             [AI Root Cause Analysis]
-            The AI agent (Mistral Small 3.1 24B via LlamaStack + OpenShift Lightspeed RAG)
-            has analyzed the alert using the OCP 4.21 product documentation and
-            produced the following root cause analysis:
+            The AI agent (Mistral Small 3.1 24B via LlamaStack) analyzed the alert using:
+            - Operational Knowledge Base ({{ kb_search_result.json.data | default([]) | length }} documents retrieved via RAG)
+            - OpenShift Lightspeed (OCP 4.21 product documentation)
 
             {{ ai_rca }}
         status_code: [200]
@@ -494,7 +564,8 @@
 
     - name: Set remediation template name
       ansible.builtin.set_fact:
-        remediation_jt_name: "Remediate {{ alert_name }}"
+        remediation_jt_name: >-
+          Remediate {{ alert_name }}{{ ' - ' + alert_qualifier if alert_qualifier | trim | length > 0 else '' }}
 
     - name: Serialize extra_vars for AAP Job Template
       ansible.builtin.set_fact:

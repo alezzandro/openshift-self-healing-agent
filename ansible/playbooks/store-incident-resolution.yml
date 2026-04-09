@@ -8,11 +8,20 @@
       ansible.builtin.set_fact:
         alert_name: "{{ alert_name | default('Unknown') }}"
         alert_description: "{{ alert_description | default('') }}"
+        alert_operator_name: "{{ alert_operator_name | default('') }}"
+        alert_mcp_name: "{{ alert_mcp_name | default('') }}"
         diagnostics: "{{ diagnostics | default({}) }}"
         snow_incident_number: "{{ snow_incident_number | default('') }}"
         ai_response_text: "{{ ai_response_text | default('') }}"
         ai_response_status: "{{ ai_response_status | default('completed') }}"
         ai_extra_vars: "{{ ai_extra_vars | default({}) }}"
+
+    - name: Derive alert qualifier for resource-specific naming
+      ansible.builtin.set_fact:
+        alert_qualifier: >-
+          {{ alert_operator_name if (alert_operator_name | default('')) | length > 0
+             else (alert_mcp_name if (alert_mcp_name | default('')) | length > 0
+             else '') }}
 
     - name: Build extra_vars schema from AI-derived vars
       ansible.builtin.set_fact:
@@ -39,7 +48,7 @@
           rca: "{{ ai_response_text }}"
           snow_incident: "{{ snow_incident_number }}"
           status: "{{ ai_response_status }}"
-          job_template_name: "Remediate {{ alert_name }}"
+          job_template_name: "Remediate {{ alert_name }}{{ ' - ' + alert_qualifier if alert_qualifier | trim | length > 0 else '' }}"
           extra_vars_schema: "{{ extra_vars_schema }}"
           extra_vars_example: "{{ ai_extra_vars | default({}) }}"
           timestamp: "{{ lookup('pipe', 'date -Iseconds') }}"

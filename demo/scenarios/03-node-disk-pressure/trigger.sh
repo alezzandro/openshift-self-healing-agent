@@ -61,32 +61,39 @@ echo ""
 echo "Target worker node: ${WORKER}"
 echo ""
 
-DISK_TOTAL_KB=$(oc debug "node/${WORKER}" --no-tty -- chroot /host df /var/tmp 2>/dev/null \
-  | awk 'NR==2{print $2}' || echo "0")
-oc delete pods -n default -l "run" --field-selector=status.phase!=Running --force --grace-period=0 2>/dev/null || true
+MCD_POD=$(oc get pods -n openshift-machine-config-operator \
+  -l k8s-app=machine-config-daemon \
+  --field-selector="spec.nodeName=${WORKER}" \
+  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+
+DISK_INFO=$(oc exec -n openshift-machine-config-operator "${MCD_POD}" -- \
+  chroot /rootfs df /var/tmp 2>/dev/null | awk 'NR==2{print $2, $3}' || echo "0 0")
+DISK_TOTAL_KB=$(echo "${DISK_INFO}" | awk '{print $1}')
+DISK_USED_KB=$(echo "${DISK_INFO}" | awk '{print $2}')
 
 DISK_TOTAL_GB=$(( DISK_TOTAL_KB / 1024 / 1024 ))
-FILL_GB=$(( DISK_TOTAL_GB * 85 / 100 ))
+DISK_USED_GB=$(( DISK_USED_KB / 1024 / 1024 ))
+TARGET_USED_GB=$(( DISK_TOTAL_GB * 92 / 100 ))
+FILL_GB=$(( TARGET_USED_GB - DISK_USED_GB ))
 if [ "${FILL_GB}" -lt 5 ]; then
-  FILL_GB=40
+  FILL_GB=5
 fi
 
-echo "Node root disk: ~${DISK_TOTAL_GB} GB.  Will fill ~${FILL_GB} GB to trigger DiskPressure."
+echo "Node root disk: ~${DISK_TOTAL_GB} GB (${DISK_USED_GB} GB used)."
+echo "Will allocate ~${FILL_GB} GB to reach ~92% usage and trigger DiskPressure."
 echo ""
 
 if [ -t 0 ]; then
-  read -rp "Press ENTER to trigger the failure (write ${FILL_GB} GB to ${WORKER})..."
+  read -rp "Press ENTER to trigger the failure (allocate ${FILL_GB} GB on ${WORKER})..."
 else
   echo "Non-interactive mode: proceeding with disk fill on ${WORKER}..."
 fi
 
 echo ""
-echo "Creating ${FILL_GB} GB file on ${WORKER} at /var/tmp/self-healing-disk-fill..."
-echo "(This may take 1-3 minutes depending on disk speed)"
-timeout 300 oc debug "node/${WORKER}" --no-tty -- \
-  chroot /host dd if=/dev/zero of=/var/tmp/self-healing-disk-fill \
-  bs=1M count=$(( FILL_GB * 1024 )) status=progress 2>&1 | tail -3 || true
-oc delete pods -n default -l "run" --field-selector=status.phase!=Running --force --grace-period=0 2>/dev/null || true
+echo "Allocating ${FILL_GB} GB on ${WORKER} at /var/tmp/self-healing-disk-fill..."
+echo "(Using fallocate -- this should complete in seconds)"
+oc exec -n openshift-machine-config-operator "${MCD_POD}" -- \
+  chroot /rootfs fallocate -l "${FILL_GB}G" /var/tmp/self-healing-disk-fill 2>&1 || true
 
 echo ""
 echo "Verifying disk pressure on node..."
@@ -104,10 +111,10 @@ done
 echo ""
 oc get node "${WORKER}" -o wide
 echo ""
-echo "The NodeFilesystemSpaceFillingUp alert should fire within ~1 minute."
-echo "The EDA rulebook will trigger the self-healing workflow."
+echo "The KubeNodePressure (DiskPressure) alert fires after ~10 minutes."
+echo "The EDA rulebook will trigger the self-healing workflow automatically."
 echo ""
 echo "Watch:    oc get node ${WORKER} -o jsonpath='{.status.conditions}' | python3 -m json.tool"
-echo "Console:  Observe > Alerting > NodeFilesystemSpaceFillingUp"
+echo "Console:  Observe > Alerting > KubeNodePressure"
 echo ""
 echo "To clean up:  ./demo/scenarios/03-node-disk-pressure/cleanup.sh"

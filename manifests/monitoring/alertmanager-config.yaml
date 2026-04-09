@@ -13,12 +13,12 @@ stringData:
       group_by: ['alertname', 'namespace']
       group_wait: 10s
       group_interval: 30s
-      repeat_interval: 4h
+      repeat_interval: 5m
       receiver: 'default'
       routes:
         - receiver: 'eda-webhook'
           matchers:
-            - alertname=~"KubeNodeNotReady|ClusterOperatorDegraded|NodeFilesystemSpaceFillingUp|MCPDegraded"
+            - alertname=~"KubeNodeNotReady|ClusterOperatorDegraded|NodeFilesystemSpaceFillingUp|NodeFilesystemAlmostOutOfSpace|KubeNodePressure|MCPDegraded"
           continue: true
 
     receivers:

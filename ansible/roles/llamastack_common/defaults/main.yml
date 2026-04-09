@@ -6,6 +6,12 @@ llamastack_timeout: 300
 llamastack_vector_top_k: 3
 llamastack_vector_score_threshold: 0.75
 
+# Operational knowledge base (RAG via LlamaStack vector store)
+llamastack_kb_vector_store_name: "ops-knowledge-base"
+llamastack_kb_top_k: 5
+llamastack_kb_configmap_name: "ops-knowledge-base-config"
+llamastack_kb_configmap_namespace: "rhoai-project"
+
 # OpenShift Lightspeed (RAG)
 ols_url: "https://lightspeed-app-server.openshift-lightspeed.svc:8443"
 ols_token_secret_name: "self-healing-ols-token"

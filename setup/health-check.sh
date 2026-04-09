@@ -99,39 +99,69 @@ else
   fail "AAP Controller route or password not found"
 fi
 
-EDA_ROUTE=$(oc get route aap-eda -n aap -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-EDA_PASS=$(oc get secret aap-eda-admin-password -n aap -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+AAP_GW_HOST=$(oc get route aap -n aap -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+AAP_GW_PASS=$(oc get secret aap-admin-password -n aap -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
 
-if [ -n "${EDA_ROUTE}" ] && [ -n "${EDA_PASS}" ]; then
-  EDA_STATUS=$(curl -sk -u "admin:${EDA_PASS}" \
-    "https://${EDA_ROUTE}/api/eda/v1/activations/" 2>/dev/null)
-  ACT_STATUS=$(echo "${EDA_STATUS}" | python3 -c "
+if [ -n "${AAP_GW_HOST}" ] && [ -n "${AAP_GW_PASS}" ]; then
+  EDA_STATUS=$(curl -sk -u "admin:${AAP_GW_PASS}" \
+    "https://${AAP_GW_HOST}/api/eda/v1/activations/" 2>/dev/null)
+  ACT_INFO=$(echo "${EDA_STATUS}" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 for a in data.get('results', []):
-    print(f'{a.get(\"status\",\"?\")},{a.get(\"is_enabled\",\"?\")}')
+    print(f'{a.get(\"id\",\"\")},{a.get(\"status\",\"?\")},{a.get(\"is_enabled\",\"?\")},{a.get(\"restart_count\",0)}')
 " 2>/dev/null | head -1)
-  ACT_ST=$(echo "${ACT_STATUS}" | cut -d',' -f1)
-  ACT_EN=$(echo "${ACT_STATUS}" | cut -d',' -f2)
+  ACT_ID=$(echo "${ACT_INFO}" | cut -d',' -f1)
+  ACT_ST=$(echo "${ACT_INFO}" | cut -d',' -f2)
+  ACT_EN=$(echo "${ACT_INFO}" | cut -d',' -f3)
+  ACT_RC=$(echo "${ACT_INFO}" | cut -d',' -f4)
+
   if [ "${ACT_ST}" = "running" ] && [ "${ACT_EN}" = "True" ]; then
     pass "EDA activation running and enabled"
   elif [ "${ACT_ST}" = "running" ]; then
     pass "EDA activation running (enabled=${ACT_EN})"
+  elif [ -n "${ACT_ID}" ] && { [ "${ACT_ST}" = "failed" ] || [ "${ACT_ST}" = "stopped" ] || [ "${ACT_ST}" = "error" ]; }; then
+    warn "EDA activation status: ${ACT_ST} (restart_count=${ACT_RC}) — attempting restart..."
+    RESTART_CODE=$(curl -sk -u "admin:${AAP_GW_PASS}" -X POST \
+      "https://${AAP_GW_HOST}/api/eda/v1/activations/${ACT_ID}/restart/" \
+      -H "Content-Type: application/json" -o /dev/null -w '%{http_code}' 2>/dev/null || echo "000")
+    if [ "${RESTART_CODE}" = "204" ] || [ "${RESTART_CODE}" = "200" ]; then
+      echo "        Restart requested (HTTP ${RESTART_CODE}). Waiting for activation to start..."
+      ACTIVATION_UP=false
+      for i in $(seq 1 12); do
+        sleep 5
+        NEW_ST=$(curl -sk -u "admin:${AAP_GW_PASS}" \
+          "https://${AAP_GW_HOST}/api/eda/v1/activations/${ACT_ID}/" 2>/dev/null \
+          | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null)
+        if [ "${NEW_ST}" = "running" ]; then
+          ACTIVATION_UP=true
+          break
+        fi
+        echo "        ... status: ${NEW_ST:-pending} (${i}/12)"
+      done
+      if [ "${ACTIVATION_UP}" = true ]; then
+        pass "EDA activation recovered — now running"
+      else
+        fail "EDA activation restart requested but did not reach running state within 60s"
+      fi
+    else
+      fail "EDA activation ${ACT_ST} — restart failed (HTTP ${RESTART_CODE})"
+    fi
   elif [ -n "${ACT_ST}" ]; then
     warn "EDA activation status: ${ACT_ST}, enabled: ${ACT_EN}"
   else
     fail "EDA activations endpoint unreachable"
   fi
 else
-  fail "EDA route or password not found"
+  fail "AAP gateway route or password not found"
 fi
 
-# Check webhook service exists
+# Check webhook service exists (created by a running activation)
 WEBHOOK_SVC=$(oc get svc cluster-alert-handler -n aap -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo "")
 if [ -n "${WEBHOOK_SVC}" ]; then
   pass "EDA webhook service exists (${WEBHOOK_SVC}:5000)"
 else
-  fail "EDA webhook service 'cluster-alert-handler' not found in aap namespace"
+  fail "EDA webhook service 'cluster-alert-handler' not found — alerts cannot reach EDA"
 fi
 
 # ─────────────────────────────────────────────

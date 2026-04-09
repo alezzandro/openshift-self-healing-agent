@@ -10,27 +10,28 @@ WORKERS=$(oc get nodes -l 'node-role.kubernetes.io/worker,!nvidia.com/gpu.presen
 
 CLEANED=0
 for WORKER in ${WORKERS}; do
+  MCD_POD=$(oc get pods -n openshift-machine-config-operator \
+    -l k8s-app=machine-config-daemon \
+    --field-selector="spec.nodeName=${WORKER}" \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+  [ -z "${MCD_POD}" ] && continue
+
+  HAS_FILE=$(oc exec -n openshift-machine-config-operator "${MCD_POD}" -- \
+    chroot /rootfs ls /var/tmp/self-healing-disk-fill 2>/dev/null && echo "yes" || echo "no")
+
   PRESSURE=$(oc get node "${WORKER}" \
     -o jsonpath='{.status.conditions[?(@.type=="DiskPressure")].status}' 2>/dev/null || echo "")
 
-  if [ "${PRESSURE}" = "True" ]; then
-    echo "Node ${WORKER} has DiskPressure. Removing fill file..."
-    timeout 60 oc debug "node/${WORKER}" --no-tty -- \
-      chroot /host rm -f /var/tmp/self-healing-disk-fill 2>/dev/null || true
-    oc delete pods -n default -l "run" --field-selector=status.phase!=Running --force --grace-period=0 2>/dev/null || true
+  if [ "${PRESSURE}" = "True" ] || [ "${HAS_FILE}" = "yes" ]; then
+    echo "Node ${WORKER}: DiskPressure=${PRESSURE}, fill file exists=${HAS_FILE}. Removing..."
+    oc exec -n openshift-machine-config-operator "${MCD_POD}" -- \
+      chroot /rootfs rm -f /var/tmp/self-healing-disk-fill /var/tmp/self-healing-disk-fill-2 /var/tmp/self-healing-disk-fill-3 2>/dev/null || true
     ((CLEANED++)) || true
   fi
 done
 
 if [ "${CLEANED}" -eq 0 ]; then
-  echo "No nodes with DiskPressure found."
-  echo "Checking all workers for leftover fill files anyway..."
-  for WORKER in ${WORKERS}; do
-    timeout 30 oc debug "node/${WORKER}" --no-tty -- \
-      chroot /host rm -f /var/tmp/self-healing-disk-fill 2>/dev/null || true
-    oc delete pods -n default -l "run" --field-selector=status.phase!=Running --force --grace-period=0 2>/dev/null || true
-  done
-  echo "  Done."
+  echo "No nodes with DiskPressure or fill files found."
   exit 0
 fi
 

@@ -15,6 +15,7 @@
         alert_namespace: "{{ alert_namespace | default('') }}"
         alert_node: "{{ alert_node | default('') }}"
         alert_operator_name: "{{ alert_operator_name | default('') }}"
+        alert_mcp_name: "{{ alert_mcp_name | default('') }}"
         diagnostics: "{{ diagnostics | default({}) }}"
         snow_incident_number: "{{ snow_incident_number | default('') }}"
         snow_instance_url: "{{ snow_instance_url | default('') }}"

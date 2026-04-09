@@ -35,7 +35,7 @@ echo "2. Building MCP server images via OpenShift BuildConfigs..."
 
 INTERNAL_REGISTRY="image-registry.openshift-image-registry.svc:5000"
 
-for MCP_NAME in servicenow-mcp git-mcp; do
+for MCP_NAME in servicenow-mcp git-mcp knowledge-base-mcp; do
   MCP_CONTEXT="${MCP_DIR}/${MCP_NAME}"
   if [ ! -f "${MCP_CONTEXT}/Containerfile" ]; then
     echo "  [ERROR] Containerfile not found: ${MCP_CONTEXT}/Containerfile"
@@ -58,7 +58,7 @@ for MCP_NAME in servicenow-mcp git-mcp; do
 done
 
 echo "  Waiting for builds to complete (this may take 2-3 minutes)..."
-for MCP_NAME in servicenow-mcp git-mcp; do
+for MCP_NAME in servicenow-mcp git-mcp knowledge-base-mcp; do
   for i in $(seq 1 60); do
     LATEST_BUILD=$(oc get builds -n self-healing-agent -l "buildconfig=${MCP_NAME}" \
       --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || echo "")
@@ -119,14 +119,16 @@ echo ""
 echo "4. Deploying MCP server manifests..."
 oc apply -f "${MANIFESTS_DIR}/servicenow-mcp.yaml"
 oc apply -f "${MANIFESTS_DIR}/git-mcp.yaml"
+oc apply -f "${MANIFESTS_DIR}/knowledge-base-mcp.yaml"
 
 echo "  Restarting deployments to pick up secrets..."
 oc rollout restart deployment/servicenow-mcp -n self-healing-agent 2>/dev/null || true
 oc rollout restart deployment/git-mcp -n self-healing-agent 2>/dev/null || true
+oc rollout restart deployment/knowledge-base-mcp -n self-healing-agent 2>/dev/null || true
 echo ""
 
 echo "5. Waiting for MCP pods to be ready..."
-for pod_label in "servicenow-mcp" "git-mcp"; do
+for pod_label in "servicenow-mcp" "git-mcp" "knowledge-base-mcp"; do
   echo "  Waiting for ${pod_label}..."
   for i in $(seq 1 60); do
     READY=$(oc get pods -n self-healing-agent -l "app=${pod_label}" \
@@ -146,5 +148,6 @@ done
 
 echo ""
 echo "=== MCP servers deployed ==="
-echo "ServiceNow MCP: servicenow-mcp.self-healing-agent.svc:8080"
-echo "Git MCP:        git-mcp.self-healing-agent.svc:8080"
+echo "ServiceNow MCP:      servicenow-mcp.self-healing-agent.svc:8080"
+echo "Git MCP:             git-mcp.self-healing-agent.svc:8080"
+echo "Knowledge Base MCP:  knowledge-base-mcp.self-healing-agent.svc:8080"

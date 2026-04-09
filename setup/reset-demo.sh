@@ -380,9 +380,78 @@ fi
 echo ""
 
 ###############################################################################
-# 5. Re-apply Alertmanager config (ensures webhook is current)
+# 5. Re-index operational knowledge base (LlamaStack vector store)
 ###############################################################################
-echo "5. Re-applying Alertmanager configuration..."
+echo "5. Re-indexing operational knowledge base..."
+
+KB_DIR="${SCRIPT_DIR}/../knowledge-base"
+KB_VS_NAME="ops-knowledge-base"
+KB_EMBEDDING_MODEL="sentence-transformers/ibm-granite/granite-embedding-125m-english"
+LS_DEPLOY_NAME="self-healing-agent"
+
+_ls_curl() {
+  oc exec -n rhoai-project "deploy/${LS_DEPLOY_NAME}" -- curl -sk "$@" 2>/dev/null
+}
+
+LS_POD=$(oc get pod -n rhoai-project \
+  -l app.kubernetes.io/instance="${LS_DEPLOY_NAME}" \
+  -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+
+if [ -n "${LS_POD}" ] && [ -d "${KB_DIR}" ]; then
+  EXISTING_VS_IDS=$(_ls_curl "http://localhost:8321/v1/vector_stores" \
+    | python3 -c "
+import sys, json
+for vs in json.load(sys.stdin).get('data', []):
+    if vs.get('name') == '${KB_VS_NAME}':
+        print(vs['id'])
+" 2>/dev/null || true)
+
+  for vid in ${EXISTING_VS_IDS}; do
+    _ls_curl "http://localhost:8321/v1/vector_stores/${vid}" -X DELETE >/dev/null
+  done
+
+  VS_ID=$(_ls_curl "http://localhost:8321/v1/vector_stores" \
+    -X POST -H 'Content-Type: application/json' \
+    -d "{\"name\":\"${KB_VS_NAME}\",\"embedding_model\":\"${KB_EMBEDDING_MODEL}\",\"provider_id\":\"faiss\"}" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || true)
+
+  if [ -n "${VS_ID}" ]; then
+    KB_DOC_COUNT=0
+    for md_file in "${KB_DIR}"/runbooks/*.md "${KB_DIR}"/references/*.md; do
+      [ -f "${md_file}" ] || continue
+      BASENAME=$(basename "${md_file}")
+      oc cp "${md_file}" "rhoai-project/${LS_POD}:/tmp/${BASENAME}" 2>/dev/null
+      FILE_ID=$(_ls_curl "http://localhost:8321/v1/files" \
+          -F "file=@/tmp/${BASENAME};type=text/plain" -F "purpose=assistants" \
+        | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || true)
+      if [ -n "${FILE_ID}" ]; then
+        ATTACH_STATUS=$(_ls_curl "http://localhost:8321/v1/vector_stores/${VS_ID}/files" \
+            -X POST -H 'Content-Type: application/json' \
+            -d "{\"file_id\":\"${FILE_ID}\"}" \
+          | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || true)
+        [ "${ATTACH_STATUS}" = "completed" ] && ((KB_DOC_COUNT++)) || true
+      fi
+    done
+
+    oc create configmap ops-knowledge-base-config -n rhoai-project \
+      --from-literal=vector_store_id="${VS_ID}" \
+      --from-literal=vector_store_name="${KB_VS_NAME}" \
+      --from-literal=embedding_model="${KB_EMBEDDING_MODEL}" \
+      --dry-run=client -o yaml | oc apply -f - &>/dev/null
+
+    ok "Knowledge base re-indexed (${KB_DOC_COUNT} documents, store: ${VS_ID})"
+  else
+    fail "Could not create vector store"
+  fi
+else
+  skip "LlamaStack not available or knowledge-base directory not found"
+fi
+echo ""
+
+###############################################################################
+# 6. Re-apply Alertmanager config (ensures webhook is current)
+###############################################################################
+echo "6. Re-applying Alertmanager configuration..."
 
 ALERTMANAGER_MANIFEST="${SCRIPT_DIR}/../manifests/monitoring/alertmanager-config.yaml"
 if [ -f "${ALERTMANAGER_MANIFEST}" ]; then
@@ -395,9 +464,9 @@ fi
 echo ""
 
 ###############################################################################
-# 6. Re-label protected nodes
+# 7. Re-label protected nodes
 ###############################################################################
-echo "6. Re-labelling protected nodes..."
+echo "7. Re-labelling protected nodes..."
 
 PROTECTED_NAMESPACES="aap rhoai-project self-healing-agent gitea"
 LABELED=0

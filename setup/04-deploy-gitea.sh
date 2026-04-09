@@ -121,6 +121,15 @@ if [ -d "${REPO_TMP}/.git" ]; then
   cp "${ANSIBLE_SRC}/ansible.cfg" "${REPO_TMP}/ansible/" 2>/dev/null || true
   cp "${ANSIBLE_SRC}/execution-environment/requirements.yml" "${REPO_TMP}/ansible/execution-environment/" 2>/dev/null || true
 
+  # Push knowledge-base documents (RAG content browsable in Git)
+  KB_SRC="${SCRIPT_DIR}/../knowledge-base"
+  if [ -d "${KB_SRC}" ]; then
+    mkdir -p "${REPO_TMP}/knowledge-base/runbooks"
+    mkdir -p "${REPO_TMP}/knowledge-base/references"
+    cp "${KB_SRC}"/runbooks/*.md "${REPO_TMP}/knowledge-base/runbooks/" 2>/dev/null || true
+    cp "${KB_SRC}"/references/*.md "${REPO_TMP}/knowledge-base/references/" 2>/dev/null || true
+  fi
+
   # AAP runner uses the repo root as CWD; provide a root-level ansible.cfg
   cat > "${REPO_TMP}/ansible.cfg" <<'ROOTCFG'
 [defaults]

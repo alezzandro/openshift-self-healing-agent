@@ -48,86 +48,10 @@ PLAYBOOK RULES (you MUST follow ALL of these):
    that the expected total number of Ready worker nodes exist, NOT by
    re-querying the original target_node name.
 7. Do NOT wrap the YAML in markdown code fences.
-
-REFERENCE — kubernetes.core.k8s_drain correct usage:
-  - "state:" is REQUIRED (either "drain" or "uncordon").
-  - All drain flags go INSIDE "delete_options:" — NOT at the top level.
-  - WRONG top-level params: delete_local_data, ignore_daemonsets,
-    grace_period, force, delete_emptydir_data. These DO NOT EXIST
-    at the top level and will cause a runtime error.
-  - The ONLY valid top-level params are: name, state, delete_options,
-    label_selectors, pod_selectors.
-  - The ONLY valid keys inside delete_options are: delete_emptydir_data,
-    disable_eviction, force, ignore_daemonsets, terminate_grace_period,
-    wait_sleep, wait_timeout. Do NOT use "grace_period" — the correct
-    name is "terminate_grace_period".
-
-REFERENCE — kubernetes.core label_selectors:
-  label_selectors is a list of STRINGS, not dicts. Example:
-    label_selectors:
-      - "machine.openshift.io/cluster-api-machine-role=worker"
-  WRONG (will error):
-    label_selectors:
-      - key: "node-role.kubernetes.io/worker"
-        operator: In
-        values: ["true"]
-
-REFERENCE — counting Ready worker nodes (correct Jinja2):
-  Use this pattern to count how many nodes have Ready=True:
-
-    - name: Wait for expected Ready worker count
-      kubernetes.core.k8s_info:
-        api_version: v1
-        kind: Node
-        label_selectors:
-          - "node-role.kubernetes.io/worker"
-      register: worker_nodes
-      until: >-
-        (worker_nodes.resources
-         | selectattr('status.conditions', 'defined')
-         | map(attribute='status.conditions')
-         | map('selectattr', 'type', 'equalto', 'Ready')
-         | map('selectattr', 'status', 'equalto', 'True')
-         | map('list') | select | list | length)
-        >= (expected_worker_count | int)
-      retries: 40
-      delay: 30
-
-  Do NOT use 'match' with a dict inside selectattr — that is not valid
-  Ansible Jinja2 and will cause a YAML parse error.
-
-OPERATIONAL RUNBOOK — approved remediation practices:
-Follow these standard operating procedures when generating playbooks.
-
-  KubeNodeNotReady:
-    The approved practice is node replacement, not recovery. Steps:
-    1. Drain the affected node (force + ignore daemonsets + disable eviction).
-    2. Look up the Machine object in openshift-machine-api that backs the node
-       (filter machines by worker role, match via status.nodeRef.name).
-    3. Delete the Machine — the MachineSet controller automatically provisions
-       a replacement with a new hostname.
-    4. Wait until the total count of Ready worker nodes reaches the expected
-       number (use expected_worker_count variable, default 3).
-    Do NOT attempt to restart the kubelet or recover the original node.
-
-  ClusterOperatorDegraded:
-    Identify the degraded operator from the alert. Query its ClusterOperator
-    status conditions to find the Degraded reason and message. Typical
-    remediation: fix the underlying resource (delete a broken config, restart
-    an operand pod, or remove a bad custom resource). Always verify the
-    operator returns to Available=True, Degraded=False.
-
-  NodeFilesystemSpaceFillingUp / disk pressure:
-    Identify the mount point under pressure. Clean up known space consumers:
-    container image cache, completed pods, old log files. If the node has a
-    disk-pressure taint, the taint should clear automatically once space is
-    freed. Verify the node taint is removed and the node is Ready.
-
-  MCPDegraded (MachineConfigPool degraded):
-    Query the MachineConfigPool status for the degraded pool. The most common
-    cause is a conflicting MachineConfig. Identify and delete the problematic
-    MachineConfig, then wait for the MCP to finish updating all nodes and
-    return to Updated=True, Degraded=False.
+8. When the OPERATIONAL KNOWLEDGE BASE section is provided in the user message,
+   follow the runbook procedures and reference patterns described there. They
+   contain approved remediation steps and tested Ansible code patterns. Adapt
+   them to the specific alert but preserve the approach and module usage.
 
 ALERT DETAILS:
 - Name: {{ alert_name }}
@@ -137,3 +61,21 @@ ALERT DETAILS:
 - Namespace: {{ alert_namespace | default('N/A') }}
 - Not-Ready Nodes: {{ diagnostics.not_ready_nodes | default([]) | join(', ') | default('None') }}
 - Degraded Operators: {{ diagnostics.degraded_operator_names | default([]) | join(', ') | default('None') }}
+{% if alert_operator_name | default('') | length > 0 %}
+{% set op_json = diagnostics.target_operator | default('{}') | from_json %}
+{% if op_json.status is defined and op_json.status.conditions is defined %}
+{% set degraded_cond = op_json.status.conditions | selectattr('type', 'equalto', 'Degraded') | list | first | default({}) %}
+- Operator Degraded Reason: {{ degraded_cond.reason | default('unknown') }}
+- Operator Degraded Message: {{ degraded_cond.message | default('unknown') }}
+{% endif %}
+{% endif %}
+{% if alert_operator_name | default('') == 'authentication' %}
+{% set oauth_json = diagnostics.oauth_config | default('{}') | from_json %}
+{% if oauth_json.spec is defined and oauth_json.spec.identityProviders is defined %}
+- OAuth Identity Providers ({{ oauth_json.spec.identityProviders | length }} configured):
+{% for idp in oauth_json.spec.identityProviders %}
+  - Name: "{{ idp.name }}", Type: {{ idp.type }}{% if idp.type == 'HTPasswd' %}, Secret: {{ idp.htpasswd.fileData.name }}{% elif idp.type == 'OpenID' %}, Secret: {{ idp.openID.clientSecret.name | default('N/A') }}{% elif idp.type == 'LDAP' %}, Secret: {{ idp.ldap.bindPassword.name | default('N/A') }}{% endif %}
+
+{% endfor %}
+{% endif %}
+{% endif %}

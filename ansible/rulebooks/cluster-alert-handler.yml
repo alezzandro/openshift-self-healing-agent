@@ -79,6 +79,54 @@
               alert_description: "{{ event.alert.annotations.description | default('Filesystem is filling up') }}"
               alert_summary: "{{ event.alert.annotations.summary | default('') }}"
 
+    - name: Handle NodeFilesystemAlmostOutOfSpace alert
+      condition: >-
+        event.alert.status == "firing"
+        and event.alert.labels.alertname == "NodeFilesystemAlmostOutOfSpace"
+      throttle:
+        once_within: 3 hours
+        group_by_attributes:
+          - event.alert.labels.alertname
+          - event.alert.labels.instance
+      action:
+        run_workflow_template:
+          name: self-healing-workflow
+          organization: Default
+          job_args:
+            extra_vars:
+              alert_name: "{{ event.alert.labels.alertname }}"
+              alert_severity: "{{ event.alert.labels.severity | default('critical') }}"
+              alert_namespace: "{{ event.alert.labels.namespace | default('') }}"
+              alert_node: "{{ event.alert.labels.instance | default('') }}"
+              alert_device: "{{ event.alert.labels.device | default('') }}"
+              alert_mountpoint: "{{ event.alert.labels.mountpoint | default('') }}"
+              alert_pod: "{{ event.alert.labels.pod | default('') }}"
+              alert_description: "{{ event.alert.annotations.description | default('Filesystem is almost out of space') }}"
+              alert_summary: "{{ event.alert.annotations.summary | default('') }}"
+
+    - name: Handle KubeNodePressure (DiskPressure) alert
+      condition: >-
+        event.alert.status == "firing"
+        and event.alert.labels.alertname == "KubeNodePressure"
+        and event.alert.labels.condition == "DiskPressure"
+      throttle:
+        once_within: 3 hours
+        group_by_attributes:
+          - event.alert.labels.alertname
+          - event.alert.labels.node
+      action:
+        run_workflow_template:
+          name: self-healing-workflow
+          organization: Default
+          job_args:
+            extra_vars:
+              alert_name: "NodeFilesystemSpaceFillingUp"
+              alert_severity: "{{ event.alert.labels.severity | default('warning') }}"
+              alert_namespace: "{{ event.alert.labels.namespace | default('') }}"
+              alert_node: "{{ event.alert.labels.node | default('') }}"
+              alert_description: "{{ event.alert.annotations.description | default('Node has active DiskPressure condition') }}"
+              alert_summary: "{{ event.alert.annotations.summary | default('') }}"
+
     - name: Handle MCPDegraded alert
       condition: >-
         event.alert.status == "firing"

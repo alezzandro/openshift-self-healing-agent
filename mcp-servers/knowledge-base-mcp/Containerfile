@@ -1,0 +1,29 @@
+FROM registry.access.redhat.com/ubi9/python-311:latest
+
+LABEL name="knowledge-base-mcp-server" \
+      description="Knowledge Base MCP server — exposes LlamaStack RAG vector store search to Gen AI Playground" \
+      io.k8s.display-name="Knowledge Base MCP Server"
+
+USER 0
+
+RUN pip install --no-cache-dir \
+    mcp \
+    mcp-proxy
+
+COPY server.py /opt/app-root/src/server.py
+
+USER 1001
+
+EXPOSE 8080
+
+ENV LLAMASTACK_URL="http://self-healing-agent-service.rhoai-project.svc.cluster.local:8321" \
+    VECTOR_STORE_NAME="ops-knowledge-base" \
+    VECTOR_STORE_ID="" \
+    DEFAULT_TOP_K="5"
+
+CMD ["mcp-proxy", \
+     "--host", "0.0.0.0", \
+     "--port", "8080", \
+     "--pass-environment", \
+     "--", \
+     "python", "/opt/app-root/src/server.py"]

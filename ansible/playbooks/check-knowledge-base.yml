@@ -8,14 +8,24 @@
       ansible.builtin.set_fact:
         alert_name: "{{ alert_name | default('Unknown') }}"
         alert_description: "{{ alert_description | default('') }}"
+        alert_operator_name: "{{ alert_operator_name | default('') }}"
+        alert_mcp_name: "{{ alert_mcp_name | default('') }}"
         diagnostics: "{{ diagnostics | default({}) }}"
         aap_controller_host: "{{ aap_controller_host | default('') }}"
         aap_controller_username: "{{ aap_controller_username | default('admin') }}"
         aap_controller_password: "{{ aap_controller_password | default('') }}"
 
+    - name: Derive alert qualifier for resource-specific KB matching
+      ansible.builtin.set_fact:
+        alert_qualifier: >-
+          {{ alert_operator_name if (alert_operator_name | default('')) | length > 0
+             else (alert_mcp_name if (alert_mcp_name | default('')) | length > 0
+             else '') }}
+
     - name: Build expected remediation template name
       ansible.builtin.set_fact:
-        expected_jt_name: "Remediate {{ alert_name }}"
+        expected_jt_name: >-
+          Remediate {{ alert_name }}{{ ' - ' + alert_qualifier if alert_qualifier | trim | length > 0 else '' }}
 
     - name: Search AAP for an existing remediation Job Template
       ansible.builtin.uri:
