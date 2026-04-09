@@ -1,0 +1,126 @@
+# OpenShift ClusterOperator Degraded Remediation
+
+When a ClusterOperator becomes Degraded, one or more pods in its managed namespace
+have crashed, are in CrashLoopBackOff, or cannot start. Common operator-to-namespace mappings:
+- ingress -> openshift-ingress
+- dns -> openshift-dns
+- monitoring -> openshift-monitoring
+- machine-api -> openshift-machine-api
+- authentication -> openshift-authentication
+- etcd -> openshift-etcd
+- kube-apiserver -> openshift-kube-apiserver
+
+## Remediation procedure using kubernetes.core Ansible modules
+
+Step 1 — Query the ClusterOperator status:
+    - name: Get ClusterOperator status
+      kubernetes.core.k8s_info:
+        api_version: config.openshift.io/v1
+        kind: ClusterOperator
+        name: OPERATOR_NAME
+      register: co_status
+
+Step 2 — List pods in the managed namespace:
+    - name: Get pods in operator namespace
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: OPERATOR_NAMESPACE
+      register: ns_pods
+
+Step 3 — Delete non-running pods to trigger restart:
+    - name: Delete non-running pods
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Pod
+        namespace: OPERATOR_NAMESPACE
+        name: "{{ item.metadata.name }}"
+        state: absent
+      loop: "{{ ns_pods.resources | rejectattr('status.phase', 'equalto', 'Running') | list }}"
+      when: ns_pods.resources | rejectattr('status.phase', 'equalto', 'Running') | list | length > 0
+
+Step 4 — Wait for the ClusterOperator to recover:
+    - name: Wait for operator to recover
+      kubernetes.core.k8s_info:
+        api_version: config.openshift.io/v1
+        kind: ClusterOperator
+        name: OPERATOR_NAME
+      register: co_check
+      until: >-
+        co_check.resources[0].status.conditions |
+        selectattr('type', 'equalto', 'Degraded') |
+        selectattr('status', 'equalto', 'False') | list | length > 0
+      retries: 20
+      delay: 30
+
+# OpenShift etcd Down Remediation
+
+etcd is the key-value store backing the Kubernetes API server. An OpenShift cluster
+runs 3 etcd members on the control-plane nodes. When one or more members go down,
+quorum may be at risk.
+
+## Remediation procedure using kubernetes.core Ansible modules
+
+Step 1 — Check etcd pod status:
+    - name: Get etcd pods
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: openshift-etcd
+        label_selectors:
+          - app=etcd
+      register: etcd_pods
+
+Step 2 — Find failed etcd pods:
+    - name: Identify failed etcd pods
+      ansible.builtin.set_fact:
+        failed_etcd: "{{ etcd_pods.resources | rejectattr('status.phase', 'equalto', 'Running') | list }}"
+
+Step 3 — Delete failed pods to trigger restart:
+    - name: Delete failed etcd pods
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Pod
+        namespace: openshift-etcd
+        name: "{{ item.metadata.name }}"
+        state: absent
+      loop: "{{ failed_etcd }}"
+      when: failed_etcd | length > 0
+
+Step 4 — Wait for all etcd members to recover:
+    - name: Wait for etcd pods to be running
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: openshift-etcd
+        label_selectors:
+          - app=etcd
+      register: etcd_check
+      until: >-
+        (etcd_check.resources | selectattr('status.phase', 'equalto', 'Running') | list | length) >= 3
+      retries: 20
+      delay: 30
+
+# Important Playbook Rules
+
+Every remediation playbook MUST follow this exact structure:
+
+---
+- name: Descriptive playbook name
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: First task
+      kubernetes.core.k8s_info:
+        ...
+
+CRITICAL RULES:
+1. hosts: localhost with connection: local (AAP runs on localhost)
+2. Do NOT add authentication parameters (host, api_key, kubeconfig, token, username, password)
+3. AAP automatically injects credentials via K8S_AUTH_HOST and K8S_AUTH_API_KEY environment variables
+4. The kubernetes.core modules read these automatically
+5. Do NOT use the uri module or oc/kubectl shell commands for Kubernetes API calls
+6. Do NOT reference undefined variables — hard-code values from the alert
+7. Always include a verification/wait task at the end
+8. Use until/retries/delay for waiting tasks

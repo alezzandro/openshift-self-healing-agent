@@ -1,0 +1,125 @@
+---
+- name: Create ServiceNow incident for the alerting event
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Set ServiceNow connection and safe defaults for alert variables
+      ansible.builtin.set_fact:
+        snow_instance: "{{ snow_instance_url | default('') }}"
+        snow_admin_user: "{{ snow_admin_username | default('admin') }}"
+        snow_admin_pass: "{{ snow_admin_password | default('') }}"
+        snow_aap_sysid: "{{ snow_aap_user_sysid | default('') }}"
+        alert_name: "{{ alert_name | default('Unknown') }}"
+        alert_description: "{{ alert_description | default('') }}"
+        diagnostics: "{{ diagnostics | default({}) }}"
+        diagnostics_summary: "{{ diagnostics_summary | default('No diagnostics summary available.') }}"
+
+    - name: Determine incident urgency based on alert
+      ansible.builtin.set_fact:
+        incident_urgency: >-
+          {% if alert_name == 'KubeNodeNotReady' %}1{% elif alert_name == 'ClusterOperatorDegraded' %}2{% elif alert_name == 'NodeFilesystemSpaceFillingUp' %}2{% elif alert_name == 'MCPDegraded' %}2{% else %}2{% endif %}
+        incident_impact: >-
+          {% if alert_name == 'KubeNodeNotReady' %}1{% elif alert_name == 'ClusterOperatorDegraded' %}2{% elif alert_name == 'NodeFilesystemSpaceFillingUp' %}2{% elif alert_name == 'MCPDegraded' %}2{% else %}2{% endif %}
+
+    # ── Impersonate svc-aap-automation ──
+
+    - name: Start impersonation session as svc-aap-automation
+      ansible.builtin.uri:
+        url: "{{ snow_instance }}/api/now/ui/impersonate/{{ snow_aap_sysid }}"
+        method: POST
+        user: "{{ snow_admin_user }}"
+        password: "{{ snow_admin_pass }}"
+        force_basic_auth: true
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+        status_code: [200, 201]
+      register: impersonate_result
+      when: snow_aap_sysid | length > 0
+
+    - name: Extract session cookie
+      ansible.builtin.set_fact:
+        snow_cookie: "{{ impersonate_result.cookies_string | default('') }}"
+      when: impersonate_result is not skipped
+
+    # ── Create incident (as svc-aap-automation via impersonation) ──
+
+    - name: Create ServiceNow incident via REST API
+      ansible.builtin.uri:
+        url: "{{ snow_instance }}/api/now/table/incident"
+        method: POST
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+          Cookie: "{{ snow_cookie | default('') }}"
+        body_format: json
+        body:
+          caller_id: "svc-aap-automation"
+          short_description: "[Self-Healing Agent] {{ alert_name }} detected on OpenShift cluster"
+          description: |
+            Alert: {{ alert_name }}
+            Description: {{ alert_description }}
+            Severity: {{ alert_severity | default('warning') }}
+            Namespace: {{ alert_namespace | default('N/A') }}
+            Node: {{ alert_node | default('N/A') }}
+            Pod: {{ alert_pod | default('N/A') }}
+            Operator: {{ alert_operator_name | default('N/A') }}
+
+            This incident was automatically created by the OpenShift Self-Healing Agent
+            via Red Hat Ansible Automation Platform Event-Driven Automation.
+          urgency: "{{ incident_urgency | trim }}"
+          impact: "{{ incident_impact | trim }}"
+          category: "Software"
+          subcategory: "Operating System"
+        status_code: [200, 201]
+      register: snow_incident
+
+    - name: Set incident facts
+      ansible.builtin.set_fact:
+        _inc_number: "{{ snow_incident.json.result.number }}"
+        _inc_sysid: "{{ snow_incident.json.result.sys_id }}"
+
+    - name: Add human-readable diagnostics as work note
+      ansible.builtin.uri:
+        url: "{{ snow_instance }}/api/now/table/incident/{{ _inc_sysid }}"
+        method: PATCH
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+          Cookie: "{{ snow_cookie | default('') }}"
+        body_format: json
+        body:
+          work_notes: |
+            [Automated Cluster Diagnostics]
+            The following diagnostics were automatically collected from the OpenShift
+            cluster by the Self-Healing Agent workflow at the time of the alert.
+
+            {{ diagnostics_summary }}
+
+            Full raw diagnostics data has been attached as a JSON file for reference.
+        status_code: [200]
+
+    - name: Attach raw diagnostics JSON to the incident
+      ansible.builtin.uri:
+        url: "{{ snow_instance }}/api/now/attachment/file?table_name=incident&table_sys_id={{ _inc_sysid }}&file_name=cluster-diagnostics-raw.json"
+        method: POST
+        headers:
+          Accept: application/json
+          Content-Type: application/json
+          Cookie: "{{ snow_cookie | default('') }}"
+        body: "{{ diagnostics | to_json }}"
+        status_code: [200, 201]
+      register: attachment_result
+      ignore_errors: true
+
+    - name: Display incident number
+      ansible.builtin.debug:
+        msg: "ServiceNow incident created: {{ _inc_number }} (as svc-aap-automation)"
+
+    - name: Set stats for downstream workflow steps
+      ansible.builtin.set_stats:
+        data:
+          snow_incident_number: "{{ _inc_number }}"
+          snow_incident_sys_id: "{{ _inc_sysid }}"
+        per_host: false

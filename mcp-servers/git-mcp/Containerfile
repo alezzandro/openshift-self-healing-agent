@@ -1,0 +1,29 @@
+FROM registry.access.redhat.com/ubi9/python-311:latest
+
+LABEL name="git-mcp-server" \
+      description="Git MCP server for LlamaStack agent integration" \
+      io.k8s.display-name="Git MCP Server"
+
+USER 0
+
+RUN pip install --no-cache-dir \
+    mcp-server-git \
+    mcp-proxy && \
+    dnf install -y git && \
+    dnf clean all
+
+RUN mkdir -p /repos && chown 1001:0 /repos
+
+USER 1001
+
+EXPOSE 8080
+
+ENV GIT_REPOS_PATH="/repos"
+
+CMD ["mcp-proxy", \
+     "--host", "0.0.0.0", \
+     "--port", "8080", \
+     "--pass-environment", \
+     "--", \
+     "mcp-server-git", \
+     "--repository", "/repos/remediation-playbooks"]

@@ -1,0 +1,50 @@
+apiVersion: llamastack.io/v1alpha1
+kind: LlamaStackDistribution
+metadata:
+  name: self-healing-agent
+  namespace: rhoai-project
+spec:
+  replicas: 1
+  server:
+    distribution:
+      name: rh-dev
+    containerSpec:
+      name: llama-stack
+      port: 8321
+      env:
+        - name: VLLM_URL
+          value: "http://mistral-small-3-1-24b-predictor.rhoai-project.svc.cluster.local:8000/v1"
+        - name: INFERENCE_MODEL
+          value: "mistral-small-3-1-24b"
+        - name: VLLM_TLS_VERIFY
+          value: "false"
+        - name: POSTGRES_HOST
+          value: "llamastack-postgres.rhoai-project.svc.cluster.local"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "llamastack"
+        - name: POSTGRES_USER
+          value: "llamastack"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: llamastack-postgres-secret
+              key: password
+        - name: ENABLE_SENTENCE_TRANSFORMERS
+          value: "true"
+        - name: EMBEDDING_PROVIDER
+          value: "sentence-transformers"
+        - name: ENABLE_FAISS
+          value: "faiss"
+        - name: FMS_ORCHESTRATOR_URL
+          value: "http://localhost"
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "500Mi"
+        limits:
+          cpu: "4"
+          memory: "8Gi"
+    storage:
+      size: "5Gi"

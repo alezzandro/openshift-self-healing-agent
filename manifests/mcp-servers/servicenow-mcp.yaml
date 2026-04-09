@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: servicenow-mcp-credentials
+  namespace: self-healing-agent
+type: Opaque
+stringData:
+  SERVICENOW_INSTANCE_URL: "https://INSTANCE.service-now.com"
+  SERVICENOW_USERNAME: "svc-ai-agent"
+  SERVICENOW_PASSWORD: "REPLACE_ME"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: servicenow-mcp
+  namespace: self-healing-agent
+  labels:
+    app: servicenow-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: servicenow-mcp
+  template:
+    metadata:
+      labels:
+        app: servicenow-mcp
+    spec:
+      containers:
+        - name: servicenow-mcp
+          image: image-registry.openshift-image-registry.svc:5000/self-healing-agent/servicenow-mcp:latest
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: servicenow-mcp-credentials
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: servicenow-mcp
+  namespace: self-healing-agent
+  labels:
+    app: servicenow-mcp
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app: servicenow-mcp

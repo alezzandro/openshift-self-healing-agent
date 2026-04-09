@@ -1,0 +1,23 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: mistral-small-3-1-24b
+  namespace: rhoai-project
+  annotations:
+    serving.kserve.io/deploymentMode: RawDeployment
+    opendatahub.io/hardware-profile-name: gpu-l4-nvidia
+    opendatahub.io/hardware-profile-namespace: redhat-ods-applications
+    opendatahub.io/model-type: generative
+    openshift.io/display-name: Mistral-Small-3.1-24B-Instruct (INT4)
+  labels:
+    opendatahub.io/dashboard: "true"
+    opendatahub.io/genai-asset: "true"
+spec:
+  predictor:
+    model:
+      modelFormat:
+        name: vLLM
+      runtime: vllm-runtime
+      storageUri: oci://registry.redhat.io/rhelai1/modelcar-mistral-small-3-1-24b-instruct-2503-quantized-w4a16:1.5
+    minReplicas: 1
+    maxReplicas: 1

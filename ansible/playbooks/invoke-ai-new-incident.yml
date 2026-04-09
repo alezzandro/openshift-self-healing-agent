@@ -1,0 +1,623 @@
+---
+- name: Invoke AI agent for new incident (RCA + playbook generation)
+  hosts: localhost
+  gather_facts: false
+
+  roles:
+    - role: llamastack_common
+
+  tasks:
+    - name: Set safe defaults for alert variables
+      ansible.builtin.set_fact:
+        alert_name: "{{ alert_name | default('Unknown') }}"
+        alert_description: "{{ alert_description | default('') }}"
+        alert_severity: "{{ alert_severity | default('warning') }}"
+        alert_namespace: "{{ alert_namespace | default('') }}"
+        alert_node: "{{ alert_node | default('') }}"
+        alert_operator_name: "{{ alert_operator_name | default('') }}"
+        diagnostics: "{{ diagnostics | default({}) }}"
+        snow_incident_number: "{{ snow_incident_number | default('') }}"
+        snow_instance_url: "{{ snow_instance_url | default('') }}"
+        snow_admin_username: "{{ snow_admin_username | default('admin') }}"
+        snow_admin_password: "{{ snow_admin_password | default('') }}"
+        snow_ai_user_sysid: "{{ snow_ai_user_sysid | default('') }}"
+        gitea_host: "{{ gitea_host | default('') }}"
+        gitea_password: "{{ gitea_password | default('') }}"
+        aap_controller_host: "{{ aap_controller_host | default('') }}"
+        aap_controller_username: "{{ aap_controller_username | default('admin') }}"
+        aap_controller_password: "{{ aap_controller_password | default('') }}"
+
+    - name: Build safe playbook filename
+      ansible.builtin.set_fact:
+        playbook_filename: "remediate-{{ alert_name | lower | regex_replace('[^a-z0-9]', '-') }}.yml"
+
+    - name: Render system prompt for new incident
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/system-prompt-new-incident.j2"
+        dest: /tmp/system-prompt.txt
+      delegate_to: localhost
+
+    - name: Read rendered system prompt
+      ansible.builtin.slurp:
+        src: /tmp/system-prompt.txt
+      register: system_prompt_content
+
+    # ── Step 0.5: RAG — query OpenShift Lightspeed for documentation context ──
+
+    - name: Read OpenShift Lightspeed SA token from cluster secret
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        name: "{{ ols_token_secret_name }}"
+        namespace: "{{ ols_token_secret_namespace }}"
+      register: ols_secret_lookup
+
+    - name: Extract OLS bearer token
+      ansible.builtin.set_fact:
+        ols_bearer_token: "{{ ols_secret_lookup.resources[0].data.token | b64decode }}"
+      when: ols_secret_lookup.resources | length > 0
+
+    - name: Query OpenShift Lightspeed for remediation guidance (RAG)
+      ansible.builtin.uri:
+        url: "{{ ols_url }}/v1/query"
+        method: POST
+        body_format: json
+        body:
+          query: >-
+            OpenShift alert {{ alert_name }} has fired.
+            Description: {{ alert_description }}.
+            Affected node: {{ alert_node | default('N/A') }}.
+            Not-ready nodes: {{ diagnostics.not_ready_nodes | default([]) | join(', ') | default('None') }}.
+            Degraded operators: {{ diagnostics.degraded_operator_names | default([]) | join(', ') | default('None') }}.
+            What are the recommended remediation steps using Ansible
+            kubernetes.core modules (k8s_info, k8s, k8s_drain)?
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+          Authorization: "Bearer {{ ols_bearer_token }}"
+        validate_certs: false
+        timeout: 120
+        status_code: [200]
+      register: ols_result
+      when: ols_bearer_token is defined
+      ignore_errors: true
+
+    - name: Build RAG context from Lightspeed response
+      ansible.builtin.set_fact:
+        rag_context: >-
+          {% if ols_result is succeeded and ols_result.json.response | default('') | length > 0 %}
+          REFERENCE DOCUMENTATION (retrieved from OpenShift Lightspeed — OCP 4.21 product documentation, {{ ols_result.json.referenced_documents | default([]) | length }} sources):
+          {{ ols_result.json.response }}
+          {% if ols_result.json.referenced_documents | default([]) | length > 0 %}
+
+          Sources:
+          {% for doc in ols_result.json.referenced_documents %}
+          - {{ doc.doc_title | default('') }}: {{ doc.doc_url | default('') }}
+          {% endfor %}
+          {% endif %}
+          {% else %}
+          (No additional documentation retrieved from OpenShift Lightspeed.)
+          {% endif %}
+
+    # ── Step 1: Call AI for RCA + Playbook generation ──
+
+    - name: Call LlamaStack Chat Completions API for RCA and playbook
+      ansible.builtin.uri:
+        url: "{{ llamastack_url }}/v1/chat/completions"
+        method: POST
+        body_format: json
+        body:
+          model: "{{ llamastack_model }}"
+          messages:
+            - role: system
+              content: "{{ system_prompt_content.content | b64decode }}"
+            - role: user
+              content: >-
+                {{ rag_context }}
+
+                Analyze this alert and respond with ALL THREE sections.
+                SECTION 1: Write a 3-5 sentence Root Cause Analysis (plain language, no YAML).
+                SECTION 2: Write ---PLAYBOOK--- then a complete, REUSABLE Ansible remediation
+                playbook using ONLY kubernetes.core modules (k8s_info, k8s, k8s_drain). The
+                playbook MUST use variables (declared in the vars: block) for ALL incident-specific
+                values such as node names and namespaces. Do NOT hard-code any alert-specific
+                values into the tasks.
+                SECTION 3: Write ---EXTRA_VARS--- then a single-line JSON object mapping each
+                playbook variable to the correct value for THIS specific incident.
+                Keep the RCA concise (max 5 sentences) so you have room for the full playbook.
+                Alert: {{ alert_name }}.
+                Description: {{ alert_description }}.
+                Affected node: {{ alert_node | default('N/A') }}.
+                Not-ready nodes: {{ diagnostics.not_ready_nodes | default([]) | join(', ') | default('None') }}.
+                Degraded operators: {{ diagnostics.degraded_operator_names | default([]) | join(', ') | default('None') }}.
+          max_tokens: 4096
+          temperature: 0.2
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+        timeout: "{{ llamastack_timeout }}"
+        status_code: [200]
+      register: ai_response
+
+    - name: Extract AI response text
+      ansible.builtin.set_fact:
+        ai_full_text: "{{ ai_response.json.choices[0].message.content | default('') }}"
+
+    - name: Parse RCA and playbook from response (marker found)
+      ansible.builtin.set_fact:
+        ai_rca: "{{ (ai_full_text.split('---PLAYBOOK---')[0]) | trim }}"
+        ai_playbook_raw: "{{ (ai_full_text.split('---PLAYBOOK---')[1]) | trim }}"
+      when: "'---PLAYBOOK---' in ai_full_text"
+
+    - name: Split playbook from extra_vars section
+      ansible.builtin.set_fact:
+        ai_playbook: "{{ (ai_playbook_raw.split('---EXTRA_VARS---')[0]) | trim }}"
+        ai_extra_vars_json: "{{ (ai_playbook_raw.split('---EXTRA_VARS---')[1]) | trim }}"
+      when:
+        - ai_playbook_raw is defined
+        - "'---EXTRA_VARS---' in ai_playbook_raw"
+
+    - name: Use full playbook when no extra_vars marker found
+      ansible.builtin.set_fact:
+        ai_playbook: "{{ ai_playbook_raw | trim }}"
+        ai_extra_vars_json: "{}"
+      when:
+        - ai_playbook_raw is defined
+        - "'---EXTRA_VARS---' not in ai_playbook_raw"
+
+    - name: Clean extra_vars JSON string
+      ansible.builtin.set_fact:
+        ai_extra_vars_clean: >-
+          {{ ai_extra_vars_json
+             | regex_replace('(?s)^```[a-zA-Z]*\n?', '')
+             | regex_replace('(?s)\n?```\s*$', '')
+             | trim
+             | regex_replace("'", '"')
+             | regex_replace('(\{|,)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', '\1 "\2":')
+          }}
+      when: ai_extra_vars_json is defined and ai_extra_vars_json | trim | length > 0
+
+    - name: Parse extra_vars into a dict (handles both string and pre-evaluated dict)
+      ansible.builtin.set_fact:
+        ai_extra_vars: "{{ ai_extra_vars_clean if ai_extra_vars_clean is mapping else (ai_extra_vars_clean | from_json) }}"
+      when: ai_extra_vars_clean is defined and ai_extra_vars_clean | length > 0
+      ignore_errors: true
+
+    - name: Build extra_vars from alert context as fallback
+      ansible.builtin.set_fact:
+        ai_extra_vars: >-
+          {{ {'target_node': alert_node} if alert_node | default('') | length > 0
+             else ({'target_operator': alert_operator_name} if alert_operator_name | default('') | length > 0
+             else {}) }}
+      when: ai_extra_vars is not defined
+
+    - name: Use full text as RCA if no marker found
+      ansible.builtin.set_fact:
+        ai_rca: "{{ ai_full_text | trim }}"
+        ai_playbook: ""
+        ai_extra_vars: {}
+      when: "'---PLAYBOOK---' not in ai_full_text"
+
+    - name: Make dedicated RCA-only AI call when first pass returned no RCA
+      ansible.builtin.uri:
+        url: "{{ llamastack_url }}/v1/chat/completions"
+        method: POST
+        body_format: json
+        body:
+          model: "{{ llamastack_model }}"
+          messages:
+            - role: system
+              content: >-
+                You are an OpenShift infrastructure expert. Write a short Root
+                Cause Analysis (3-5 sentences) for a human operations team.
+                Cover: what is happening, the most likely root cause, the
+                impact on workloads, and a recommended action. Do NOT output
+                any YAML, code, or playbooks. Plain language only.
+            - role: user
+              content: >-
+                Alert: {{ alert_name }}.
+                Description: {{ alert_description }}.
+                Affected node: {{ alert_node | default('N/A') }}.
+                Not-ready nodes: {{ diagnostics.not_ready_nodes | default([]) | join(', ') | default('None') }}.
+                Degraded operators: {{ diagnostics.degraded_operator_names | default([]) | join(', ') | default('None') }}.
+          max_tokens: 400
+          temperature: 0.3
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+        timeout: "{{ llamastack_timeout }}"
+        status_code: [200]
+      register: rca_only_response
+      when: ai_rca | trim | length == 0
+      ignore_errors: true
+
+    - name: Use dedicated RCA response
+      ansible.builtin.set_fact:
+        ai_rca: "{{ rca_only_response.json.choices[0].message.content | default('') | trim }}"
+      when:
+        - ai_rca | trim | length == 0
+        - rca_only_response is not skipped
+        - rca_only_response is not failed
+        - (rca_only_response.json.choices[0].message.content | default('')) | trim | length > 0
+
+    - name: Generate diagnostics-based RCA when AI did not provide one
+      ansible.builtin.set_fact:
+        ai_rca: >-
+          The OpenShift cluster has raised a "{{ alert_name }}" alert
+          (severity: {{ alert_severity | default('warning') }}).
+          {% if alert_name == 'KubeNodeNotReady' %}
+          Node {{ alert_node | default('unknown') }} is reporting a NotReady
+          condition, which typically means the kubelet process has stopped,
+          the node has lost network connectivity, or a system-level failure
+          (kernel panic, resource exhaustion) has occurred. All pods
+          scheduled on this node will be evicted after the pod-eviction
+          timeout, potentially impacting workloads that lack anti-affinity
+          or replica spread across nodes.
+          {% elif 'ClusterOperatorDegraded' in alert_name %}
+          Cluster operator "{{ alert_operator_name | default('unknown') }}"
+          is in a Degraded state. This can be caused by missing pods,
+          failed rollouts, or configuration drift in the operator's managed
+          namespace. Degraded operators may reduce cluster functionality and
+          should be investigated promptly.
+          {% elif 'etcd' in alert_name %}
+          One or more etcd members are down, which reduces the quorum
+          margin for the cluster control plane. If additional members fail,
+          the Kubernetes API server will become unavailable. This is
+          typically caused by a control-plane node failure, disk pressure,
+          or network partition.
+          {% else %}
+          The alert indicates an infrastructure-level issue that requires
+          investigation. Check the cluster diagnostics attached to this
+          incident for detailed node status, operator conditions, and
+          recent events.
+          {% endif %}
+          Recommended action: review the attached diagnostics and the
+          AI-generated remediation playbook, then launch the corresponding
+          AAP Job Template.
+      when: ai_rca | trim | length == 0
+
+    - name: Display AI analysis
+      ansible.builtin.debug:
+        msg: |
+          === AI Root Cause Analysis ===
+          {{ ai_rca | truncate(500) }}
+          === Playbook Generated ===
+          {{ 'Yes (' ~ (ai_playbook | length) ~ ' chars)' if ai_playbook | length > 0 else 'No playbook section found' }}
+
+    # ── Step 2: Impersonate svc-ai-agent and update ServiceNow with RCA ──
+
+    - name: Start impersonation session as svc-ai-agent
+      ansible.builtin.uri:
+        url: "{{ snow_instance_url }}/api/now/ui/impersonate/{{ snow_ai_user_sysid }}"
+        method: POST
+        user: "{{ snow_admin_username }}"
+        password: "{{ snow_admin_password }}"
+        force_basic_auth: true
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+        status_code: [200, 201]
+      register: ai_impersonate_result
+      when:
+        - snow_instance_url | length > 0
+        - snow_ai_user_sysid | length > 0
+
+    - name: Extract AI agent session cookie
+      ansible.builtin.set_fact:
+        snow_ai_cookie: "{{ ai_impersonate_result.cookies_string | default('') }}"
+      when: ai_impersonate_result is not skipped
+
+    - name: Look up ServiceNow incident for RCA update
+      ansible.builtin.uri:
+        url: "{{ snow_instance_url }}/api/now/table/incident?sysparm_query=number={{ snow_incident_number }}"
+        method: GET
+        headers:
+          Accept: application/json
+          Cookie: "{{ snow_ai_cookie | default('') }}"
+        status_code: 200
+      register: snow_incident_lookup
+      when: snow_incident_number | length > 0
+
+    - name: Update incident with AI Root Cause Analysis
+      ansible.builtin.uri:
+        url: "{{ snow_instance_url }}/api/now/table/incident/{{ snow_incident_lookup.json.result[0].sys_id }}"
+        method: PATCH
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+          Cookie: "{{ snow_ai_cookie | default('') }}"
+        body_format: json
+        body:
+          work_notes: |
+            [AI Root Cause Analysis]
+            The AI agent (Mistral Small 3.1 24B via LlamaStack + OpenShift Lightspeed RAG)
+            has analyzed the alert using the OCP 4.21 product documentation and
+            produced the following root cause analysis:
+
+            {{ ai_rca }}
+        status_code: [200]
+      when:
+        - snow_incident_number | length > 0
+        - snow_incident_lookup.json.result | length > 0
+        - ai_rca | trim | length > 0
+
+    - name: Post fallback note when AI produced no usable RCA
+      ansible.builtin.uri:
+        url: "{{ snow_instance_url }}/api/now/table/incident/{{ snow_incident_lookup.json.result[0].sys_id }}"
+        method: PATCH
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+          Cookie: "{{ snow_ai_cookie | default('') }}"
+        body_format: json
+        body:
+          work_notes: >-
+            [AI Root Cause Analysis]
+            The AI agent was invoked but did not produce a usable root cause analysis.
+            Manual investigation is recommended.
+        status_code: [200]
+      when:
+        - snow_incident_number | length > 0
+        - snow_incident_lookup.json.result | length > 0
+        - ai_rca | trim | length == 0
+
+    # ── Step 3: Clean up and push playbook to Git ──
+
+    - name: Strip markdown code fences from AI-generated playbook
+      ansible.builtin.set_fact:
+        ai_playbook: >-
+          {{ ai_playbook
+             | regex_replace('(?s)^```[a-zA-Z]*\n?', '')
+             | regex_replace('(?s)\n?```\s*$', '')
+             | trim }}
+      when: ai_playbook | length > 0
+
+    - name: Push playbook to Gitea via API
+      ansible.builtin.uri:
+        url: "https://{{ gitea_host }}/api/v1/repos/gitea_admin/remediation-playbooks/contents/playbooks/{{ playbook_filename }}"
+        method: POST
+        user: "gitea_admin"
+        password: "{{ gitea_password }}"
+        force_basic_auth: true
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+        body_format: json
+        body:
+          message: "AI-generated remediation for {{ alert_name }}"
+          content: "{{ ai_playbook | b64encode }}"
+        status_code: [200, 201, 409, 422]
+        validate_certs: false
+      register: git_push_result
+      when: ai_playbook | length > 0
+
+    # ── Step 4: Sync AAP project and create Job Template ──
+
+    - name: Sync AAP project to pick up new playbook
+      ansible.builtin.uri:
+        url: "{{ aap_controller_host }}/api/controller/v2/projects/?name=Self-Healing+Agent"
+        method: GET
+        user: "{{ aap_controller_username }}"
+        password: "{{ aap_controller_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        headers:
+          Accept: application/json
+        status_code: 200
+      register: aap_project_lookup
+      when:
+        - ai_playbook | length > 0
+        - aap_controller_host | length > 0
+
+    - name: Trigger project sync
+      ansible.builtin.uri:
+        url: "{{ aap_controller_host }}/api/controller/v2/projects/{{ aap_project_lookup.json.results[0].id }}/update/"
+        method: POST
+        user: "{{ aap_controller_username }}"
+        password: "{{ aap_controller_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+        status_code: [200, 201, 202]
+      when:
+        - ai_playbook | length > 0
+        - aap_project_lookup.json.results | default([]) | length > 0
+
+    - name: Wait for project sync to complete
+      ansible.builtin.uri:
+        url: "{{ aap_controller_host }}/api/controller/v2/projects/{{ aap_project_lookup.json.results[0].id }}/"
+        method: GET
+        user: "{{ aap_controller_username }}"
+        password: "{{ aap_controller_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        headers:
+          Accept: application/json
+        status_code: 200
+      register: project_status
+      until: project_status.json.status | default('') in ['successful', 'failed', 'error']
+      retries: 30
+      delay: 5
+      when:
+        - ai_playbook | length > 0
+        - aap_project_lookup.json.results | default([]) | length > 0
+
+    - name: Look up Execution Environment ID
+      ansible.builtin.uri:
+        url: "{{ aap_controller_host }}/api/controller/v2/execution_environments/?name=Self-Healing+Agent+EE"
+        method: GET
+        user: "{{ aap_controller_username }}"
+        password: "{{ aap_controller_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        headers:
+          Accept: application/json
+        status_code: 200
+      register: ee_lookup
+      when:
+        - ai_playbook | length > 0
+        - aap_controller_host | length > 0
+
+    - name: Look up Inventory ID
+      ansible.builtin.uri:
+        url: "{{ aap_controller_host }}/api/controller/v2/inventories/?name=Self-Healing+Inventory"
+        method: GET
+        user: "{{ aap_controller_username }}"
+        password: "{{ aap_controller_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        headers:
+          Accept: application/json
+        status_code: 200
+      register: inv_lookup
+      when:
+        - ai_playbook | length > 0
+        - aap_controller_host | length > 0
+
+    - name: Look up OpenShift Cluster credential ID
+      ansible.builtin.uri:
+        url: "{{ aap_controller_host }}/api/controller/v2/credentials/?name=OpenShift+Cluster"
+        method: GET
+        user: "{{ aap_controller_username }}"
+        password: "{{ aap_controller_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        headers:
+          Accept: application/json
+        status_code: 200
+      register: cred_lookup
+      when:
+        - ai_playbook | length > 0
+        - aap_controller_host | length > 0
+
+    - name: Set remediation template name
+      ansible.builtin.set_fact:
+        remediation_jt_name: "Remediate {{ alert_name }}"
+
+    - name: Serialize extra_vars for AAP Job Template
+      ansible.builtin.set_fact:
+        jt_extra_vars_yaml: "{{ ai_extra_vars | default({}) | to_nice_yaml }}"
+
+    - name: Create remediation Job Template in AAP
+      ansible.builtin.uri:
+        url: "{{ aap_controller_host }}/api/controller/v2/job_templates/"
+        method: POST
+        user: "{{ aap_controller_username }}"
+        password: "{{ aap_controller_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+        body_format: json
+        body:
+          name: "{{ remediation_jt_name }}"
+          project: "{{ aap_project_lookup.json.results[0].id }}"
+          playbook: "playbooks/{{ playbook_filename }}"
+          inventory: "{{ inv_lookup.json.results[0].id }}"
+          execution_environment: "{{ ee_lookup.json.results[0].id | default(omit) }}"
+          ask_variables_on_launch: true
+          extra_vars: "{{ jt_extra_vars_yaml }}"
+        status_code: [200, 201]
+      register: jt_create_result
+      when:
+        - ai_playbook | length > 0
+        - aap_project_lookup.json.results | default([]) | length > 0
+        - inv_lookup.json.results | default([]) | length > 0
+      ignore_errors: true
+
+    - name: Build credential association payload
+      ansible.builtin.set_fact:
+        _cred_assoc_body:
+          id: "{{ cred_lookup.json.results[0].id }}"
+      when:
+        - cred_lookup.json.results | default([]) | length > 0
+
+    - name: Associate OpenShift credential with the new Job Template
+      ansible.builtin.uri:
+        url: "{{ aap_controller_host }}/api/controller/v2/job_templates/{{ jt_create_result.json.id }}/credentials/"
+        method: POST
+        user: "{{ aap_controller_username }}"
+        password: "{{ aap_controller_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+        body_format: json
+        body: "{{ _cred_assoc_body | combine({'id': _cred_assoc_body.id | int}) }}"
+        status_code: [200, 201, 204]
+      when:
+        - jt_create_result is not skipped
+        - jt_create_result is not failed
+        - _cred_assoc_body is defined
+
+    # ── Step 5: Update ServiceNow with remediation info (still as svc-ai-agent) ──
+
+    - name: Update incident with remediation details
+      ansible.builtin.uri:
+        url: "{{ snow_instance_url }}/api/now/table/incident/{{ snow_incident_lookup.json.result[0].sys_id }}"
+        method: PATCH
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+          Cookie: "{{ snow_ai_cookie | default('') }}"
+        body_format: json
+        body:
+          work_notes: |
+            [AI Remediation Ready - Action Required]
+            The AI agent has generated a remediation playbook and it is ready for
+            human review and execution.
+
+            KNOWLEDGE SOURCES CONSULTED
+            {% if ols_result is defined and ols_result is succeeded %}
+            {% for doc in ols_result.json.referenced_documents | default([]) %}
+            - {{ doc.doc_title | default('') }}: {{ doc.doc_url | default('') }}
+            {% endfor %}
+            {% endif %}
+
+            REMEDIATION PLAYBOOK
+            - Git repository path: playbooks/{{ playbook_filename }}
+            - View in Gitea: https://{{ gitea_host }}/gitea_admin/remediation-playbooks/src/branch/main/playbooks/{{ playbook_filename }}
+
+            AAP JOB TEMPLATE
+            - Template name: {{ remediation_jt_name }}
+            - AAP Console: {{ aap_controller_host }}
+            - Credentials: OpenShift Cluster (pre-attached)
+            {% if ai_extra_vars | default({}) | length > 0 %}
+            - Extra variables (pre-filled for this incident):
+            {% for k, v in (ai_extra_vars | default({})).items() %}
+              {{ k }}: {{ v }}
+            {% endfor %}
+            {% else %}
+            - Extra variables: none required
+            {% endif %}
+
+            HOW TO LAUNCH
+            1. Review the playbook in Gitea (link above)
+            2. Open AAP Console > Resources > Templates
+            3. Find "{{ remediation_jt_name }}" and click the rocket icon to Launch
+            {% if ai_extra_vars | default({}) | length > 0 %}
+            4. Verify the pre-filled extra variables are correct for this incident, then click Next > Launch
+            {% else %}
+            4. Accept the defaults and click Next > Launch
+            {% endif %}
+            5. Monitor the job output for success or failure
+            6. Update this incident with the execution results
+        status_code: [200]
+      when:
+        - snow_incident_number | length > 0
+        - snow_incident_lookup.json.result | length > 0
+        - ai_playbook | length > 0
+
+    - name: Set stats with AI response for downstream steps
+      ansible.builtin.set_stats:
+        data:
+          ai_response_text: "{{ ai_rca }}"
+          ai_playbook_generated: "{{ ai_playbook | length > 0 }}"
+          ai_response_status: "completed"
+          remediation_jt_name: "{{ remediation_jt_name | default('') }}"
+          ai_extra_vars: "{{ ai_extra_vars | default({}) }}"
+        per_host: false

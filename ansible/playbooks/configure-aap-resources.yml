@@ -1,0 +1,410 @@
+---
+- name: Configure AAP resources for the self-healing workflow
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    controller_host: "{{ lookup('env', 'CONTROLLER_HOST') }}"
+    controller_username: "{{ lookup('env', 'CONTROLLER_USERNAME') | default('admin', true) }}"
+    controller_password: "{{ lookup('env', 'CONTROLLER_PASSWORD') }}"
+    controller_verify_ssl: false
+    gitea_url: "{{ lookup('env', 'GITEA_URL') }}"
+    gitea_username: "gitea_admin"
+    gitea_password: "{{ lookup('env', 'GITEA_ADMIN_PASSWORD') }}"
+    gitea_host: "{{ lookup('env', 'GITEA_URL') | regex_replace('^https?://', '') }}"
+    snow_instance: "{{ lookup('env', 'SNOW_INSTANCE') }}"
+    snow_admin_username: "{{ lookup('env', 'SNOW_ADMIN_USERNAME') | default('admin', true) }}"
+    snow_admin_password: "{{ lookup('env', 'SNOW_ADMIN_PASSWORD') }}"
+    snow_aap_user_sysid: "{{ lookup('env', 'SNOW_AAP_USER_SYSID') }}"
+    snow_ai_user_sysid: "{{ lookup('env', 'SNOW_AI_USER_SYSID') }}"
+    ee_image: "{{ lookup('env', 'EE_IMAGE') | default('image-registry.openshift-image-registry.svc:5000/aap/self-healing-ee:latest', true) }}"
+
+  tasks:
+    - name: Create organization
+      ansible.controller.organization:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        name: "Default"
+        state: present
+
+    - name: Get in-cluster service account token for AAP
+      ansible.builtin.command:
+        cmd: oc create token self-healing-sa -n aap --duration=8760h
+      register: sa_token_result
+      changed_when: false
+      ignore_errors: true
+
+    - name: Ensure self-healing SA exists
+      ansible.builtin.command:
+        cmd: "{{ item }}"
+      loop:
+        - oc create sa self-healing-sa -n aap
+        - oc adm policy add-cluster-role-to-user cluster-admin -z self-healing-sa -n aap
+      changed_when: false
+      ignore_errors: true
+      when: sa_token_result is failed
+
+    - name: Retry token creation after SA setup
+      ansible.builtin.command:
+        cmd: oc create token self-healing-sa -n aap --duration=8760h
+      register: sa_token_retry
+      changed_when: false
+      when: sa_token_result is failed
+
+    - name: Set SA token fact
+      ansible.builtin.set_fact:
+        sa_bearer_token: "{{ (sa_token_retry.stdout | default('')) if (sa_token_result is failed) else (sa_token_result.stdout | default('')) }}"
+
+    - name: Create OpenShift credential
+      ansible.controller.credential:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        name: "OpenShift Cluster"
+        organization: "Default"
+        credential_type: "OpenShift or Kubernetes API Bearer Token"
+        inputs:
+          host: "https://kubernetes.default.svc"
+          bearer_token: "{{ sa_bearer_token }}"
+          verify_ssl: false
+        state: present
+      when: sa_bearer_token | default('') | length > 0
+
+    - name: Create ServiceNow credential
+      ansible.controller.credential:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        name: "ServiceNow"
+        organization: "Default"
+        credential_type: "Machine"
+        inputs:
+          username: "{{ snow_admin_username }}"
+          password: "{{ snow_admin_password }}"
+        state: present
+
+    - name: Create Gitea SCM credential
+      ansible.controller.credential:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        name: "Gitea SCM"
+        organization: "Default"
+        credential_type: "Source Control"
+        inputs:
+          username: "{{ gitea_username }}"
+          password: "{{ gitea_password }}"
+        state: present
+
+    - name: Create self-healing project (this repo)
+      ansible.controller.project:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        name: "Self-Healing Agent"
+        organization: "Default"
+        scm_type: "git"
+        scm_url: "{{ gitea_url }}/gitea_admin/remediation-playbooks.git"
+        scm_credential: "Gitea SCM"
+        scm_branch: "main"
+        scm_update_on_launch: true
+        state: present
+
+    - name: Sync project to discover playbooks
+      ansible.controller.project_update:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        project: "Self-Healing Agent"
+        wait: true
+        timeout: 120
+
+    - name: Create execution environment
+      ansible.controller.execution_environment:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        name: "Self-Healing Agent EE"
+        image: "{{ ee_image }}"
+        pull: "missing"
+        state: present
+
+    - name: Create localhost inventory
+      ansible.controller.inventory:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        name: "Self-Healing Inventory"
+        organization: "Default"
+        state: present
+
+    - name: Add localhost host
+      ansible.controller.host:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        name: "localhost"
+        inventory: "Self-Healing Inventory"
+        variables:
+          ansible_connection: local
+          ansible_python_interpreter: "{{ '{{ ansible_playbook_python }}' }}"
+        state: present
+
+    - name: Create Job Templates for workflow steps (standard)
+      ansible.controller.job_template:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        name: "{{ item.name }}"
+        organization: "Default"
+        project: "Self-Healing Agent"
+        playbook: "{{ item.playbook }}"
+        inventory: "Self-Healing Inventory"
+        execution_environment: "Self-Healing Agent EE"
+        credentials:
+          - "OpenShift Cluster"
+        extra_vars:
+          snow_instance_url: "{{ snow_instance }}"
+          snow_admin_username: "{{ snow_admin_username }}"
+          snow_admin_password: "{{ snow_admin_password }}"
+          snow_aap_user_sysid: "{{ snow_aap_user_sysid }}"
+          snow_ai_user_sysid: "{{ snow_ai_user_sysid }}"
+        state: present
+      loop:
+        - name: "Gather Cluster Diagnostics"
+          playbook: "ansible/playbooks/gather-cluster-diagnostics.yml"
+        - name: "Create ServiceNow Incident"
+          playbook: "ansible/playbooks/create-servicenow-incident.yml"
+        - name: "Store Incident Resolution"
+          playbook: "ansible/playbooks/store-incident-resolution.yml"
+
+    - name: Create Check Knowledge Base JT (needs AAP controller creds)
+      ansible.controller.job_template:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        name: "Check Knowledge Base"
+        organization: "Default"
+        project: "Self-Healing Agent"
+        playbook: "ansible/playbooks/check-knowledge-base.yml"
+        inventory: "Self-Healing Inventory"
+        execution_environment: "Self-Healing Agent EE"
+        credentials:
+          - "OpenShift Cluster"
+        extra_vars:
+          snow_instance_url: "{{ snow_instance }}"
+          snow_admin_username: "{{ snow_admin_username }}"
+          snow_admin_password: "{{ snow_admin_password }}"
+          snow_aap_user_sysid: "{{ snow_aap_user_sysid }}"
+          snow_ai_user_sysid: "{{ snow_ai_user_sysid }}"
+          aap_controller_host: "{{ controller_host }}"
+          aap_controller_username: "{{ controller_username }}"
+          aap_controller_password: "{{ controller_password }}"
+        state: present
+
+    - name: Create Job Templates for AI workflow steps (with Gitea + Controller creds)
+      ansible.controller.job_template:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        name: "{{ item.name }}"
+        organization: "Default"
+        project: "Self-Healing Agent"
+        playbook: "{{ item.playbook }}"
+        inventory: "Self-Healing Inventory"
+        execution_environment: "Self-Healing Agent EE"
+        credentials:
+          - "OpenShift Cluster"
+        extra_vars:
+          snow_instance_url: "{{ snow_instance }}"
+          snow_admin_username: "{{ snow_admin_username }}"
+          snow_admin_password: "{{ snow_admin_password }}"
+          snow_aap_user_sysid: "{{ snow_aap_user_sysid }}"
+          snow_ai_user_sysid: "{{ snow_ai_user_sysid }}"
+          gitea_host: "{{ gitea_host }}"
+          gitea_password: "{{ gitea_password }}"
+          aap_controller_host: "{{ controller_host }}"
+          aap_controller_username: "{{ controller_username }}"
+          aap_controller_password: "{{ controller_password }}"
+        state: present
+      loop:
+        - name: "AI Root Cause Analysis - New Incident"
+          playbook: "ansible/playbooks/invoke-ai-new-incident.yml"
+        - name: "AI Root Cause Analysis - Known Incident"
+          playbook: "ansible/playbooks/invoke-ai-known-incident.yml"
+
+    - name: Create Workflow Job Template
+      ansible.controller.workflow_job_template:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        name: "self-healing-workflow"
+        organization: "Default"
+        inventory: "Self-Healing Inventory"
+        ask_variables_on_launch: true
+        state: present
+
+    - name: Build workflow nodes
+      ansible.controller.workflow_job_template_node:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        workflow_job_template: "self-healing-workflow"
+        identifier: "{{ item.id }}"
+        unified_job_template: "{{ item.template }}"
+        state: present
+      loop:
+        - { id: "gather-diagnostics", template: "Gather Cluster Diagnostics" }
+        - { id: "create-snow-incident", template: "Create ServiceNow Incident" }
+        - { id: "check-knowledge-base", template: "Check Knowledge Base" }
+        - { id: "ai-rca-new", template: "AI Root Cause Analysis - New Incident" }
+        - { id: "ai-rca-known", template: "AI Root Cause Analysis - Known Incident" }
+        - { id: "store-resolution", template: "Store Incident Resolution" }
+
+    - name: Link Gather Diagnostics -> Create ServiceNow Incident
+      ansible.controller.workflow_job_template_node:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        workflow_job_template: "self-healing-workflow"
+        identifier: "gather-diagnostics"
+        success_nodes:
+          - "create-snow-incident"
+        state: present
+
+    - name: Link Create Incident -> Check Knowledge Base
+      ansible.controller.workflow_job_template_node:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        workflow_job_template: "self-healing-workflow"
+        identifier: "create-snow-incident"
+        success_nodes:
+          - "check-knowledge-base"
+        state: present
+
+    - name: Link Check KB -> AI RCA New (no match) or AI RCA Known (match)
+      ansible.controller.workflow_job_template_node:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        workflow_job_template: "self-healing-workflow"
+        identifier: "check-knowledge-base"
+        success_nodes:
+          - "ai-rca-new"
+        failure_nodes:
+          - "ai-rca-known"
+        state: present
+
+    - name: Link AI RCA New -> Store Resolution
+      ansible.controller.workflow_job_template_node:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        workflow_job_template: "self-healing-workflow"
+        identifier: "ai-rca-new"
+        success_nodes:
+          - "store-resolution"
+        state: present
+
+    - name: Link AI RCA Known -> Store Resolution
+      ansible.controller.workflow_job_template_node:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        workflow_job_template: "self-healing-workflow"
+        identifier: "ai-rca-known"
+        success_nodes:
+          - "store-resolution"
+        state: present
+
+    # ── EDA Configuration ──
+
+    - name: Create EDA AAP credential
+      ansible.eda.credential:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        name: "AAP Gateway"
+        credential_type_name: "Red Hat Ansible Automation Platform"
+        organization_name: "Default"
+        inputs:
+          host: "{{ controller_host }}/api/controller/"
+          username: "{{ controller_username }}"
+          password: "{{ controller_password }}"
+          verify_ssl: false
+        state: present
+
+    - name: Create EDA decision environment
+      ansible.eda.decision_environment:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        name: "Self-Healing Agent DE"
+        image_url: "registry.redhat.io/ansible-automation-platform-25/de-supported-rhel9:latest"
+        organization_name: "Default"
+        state: present
+
+    - name: Create EDA project
+      ansible.eda.project:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        name: "Self-Healing Agent"
+        url: "{{ gitea_url }}/gitea_admin/remediation-playbooks.git"
+        credential: "Gitea SCM"
+        organization_name: "Default"
+        state: present
+
+    - name: Wait for EDA project sync
+      ansible.eda.project_info:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        name: "Self-Healing Agent"
+      register: eda_project_info
+      until: >-
+        eda_project_info.projects | default([]) | length > 0
+        and eda_project_info.projects[0].import_state | default('') == 'completed'
+      retries: 20
+      delay: 10
+
+    - name: Create EDA rulebook activation
+      ansible.eda.rulebook_activation:
+        controller_host: "{{ controller_host }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_verify_ssl }}"
+        name: "Cluster Alert Handler"
+        project_name: "Self-Healing Agent"
+        rulebook_name: "cluster-alert-handler.yml"
+        decision_environment_name: "Self-Healing Agent DE"
+        eda_credentials:
+          - "AAP Gateway"
+        organization_name: "Default"
+        state: present

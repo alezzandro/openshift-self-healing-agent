@@ -1,0 +1,113 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: git-mcp-credentials
+  namespace: self-healing-agent
+type: Opaque
+stringData:
+  GITEA_URL: "https://gitea-gitea.apps.CLUSTER_DOMAIN"
+  GITEA_USERNAME: "gitea_admin"
+  GITEA_PASSWORD: "REPLACE_ME"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: git-mcp-repos
+  namespace: self-healing-agent
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: gp3-csi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: git-mcp
+  namespace: self-healing-agent
+  labels:
+    app: git-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: git-mcp
+  template:
+    metadata:
+      labels:
+        app: git-mcp
+    spec:
+      initContainers:
+        - name: clone-repo
+          image: image-registry.openshift-image-registry.svc:5000/self-healing-agent/git-mcp:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              if [ ! -d /repos/remediation-playbooks/.git ]; then
+                git clone "https://${GITEA_USERNAME}:${GITEA_PASSWORD}@${GITEA_URL#https://}/gitea_admin/remediation-playbooks.git" \
+                  /repos/remediation-playbooks
+                cd /repos/remediation-playbooks
+                git config user.name "AI Agent"
+                git config user.email "ai-agent@self-healing-demo.local"
+              else
+                echo "Repository already cloned, skipping."
+              fi
+          envFrom:
+            - secretRef:
+                name: git-mcp-credentials
+          volumeMounts:
+            - name: repos
+              mountPath: /repos
+      containers:
+        - name: git-mcp
+          image: image-registry.openshift-image-registry.svc:5000/self-healing-agent/git-mcp:latest
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: git-mcp-credentials
+          volumeMounts:
+            - name: repos
+              mountPath: /repos
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: repos
+          persistentVolumeClaim:
+            claimName: git-mcp-repos
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: git-mcp
+  namespace: self-healing-agent
+  labels:
+    app: git-mcp
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app: git-mcp

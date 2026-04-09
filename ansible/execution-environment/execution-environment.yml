@@ -1,0 +1,20 @@
+---
+version: 3
+
+images:
+  base_image:
+    name: registry.redhat.io/ansible-automation-platform-26/ee-supported-rhel9:latest
+
+dependencies:
+  galaxy: requirements.yml
+  python: requirements.txt
+  system: bindep.txt
+
+options:
+  package_manager_path: /usr/bin/microdnf
+
+additional_build_steps:
+  prepend_base:
+    - RUN /usr/bin/microdnf install -y python3-pip python3.12-pip && /usr/bin/microdnf clean all
+  append_final:
+    - RUN pip3 install --upgrade pip setuptools

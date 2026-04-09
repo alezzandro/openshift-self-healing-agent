@@ -1,0 +1,12 @@
+---
+llamastack_url: "http://self-healing-agent-service.rhoai-project.svc.cluster.local:8321"
+llamastack_model: "vllm-inference/mistral-small-3-1-24b"
+llamastack_vector_bank: "incident-resolutions"
+llamastack_timeout: 300
+llamastack_vector_top_k: 3
+llamastack_vector_score_threshold: 0.75
+
+# OpenShift Lightspeed (RAG)
+ols_url: "https://lightspeed-app-server.openshift-lightspeed.svc:8443"
+ols_token_secret_name: "self-healing-ols-token"
+ols_token_secret_namespace: "openshift-lightspeed"

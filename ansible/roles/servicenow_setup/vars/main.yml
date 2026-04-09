@@ -1,0 +1,3 @@
+---
+snow_api_base: "{{ snow_instance }}/api/now"
+snow_table_api: "{{ snow_api_base }}/table"

@@ -1,0 +1,5 @@
+systemd-devel [platform:redhat]
+python3.12-devel [platform:redhat]
+python3-devel [platform:redhat]
+gcc [platform:redhat]
+libxml2-devel [platform:redhat]

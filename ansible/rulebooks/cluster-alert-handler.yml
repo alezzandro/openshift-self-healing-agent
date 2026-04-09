@@ -1,0 +1,104 @@
+---
+- name: OpenShift Self-Healing Cluster Alert Handler
+  hosts: all
+  sources:
+    - ansible.eda.alertmanager:
+        host: 0.0.0.0
+        port: 5000
+
+  rules:
+    - name: Handle KubeNodeNotReady alert
+      condition: >-
+        event.alert.status == "firing"
+        and event.alert.labels.alertname == "KubeNodeNotReady"
+      throttle:
+        once_within: 3 hours
+        group_by_attributes:
+          - event.alert.labels.alertname
+          - event.alert.labels.node
+      action:
+        run_workflow_template:
+          name: self-healing-workflow
+          organization: Default
+          job_args:
+            extra_vars:
+              alert_name: "{{ event.alert.labels.alertname }}"
+              alert_severity: "{{ event.alert.labels.severity | default('warning') }}"
+              alert_namespace: "{{ event.alert.labels.namespace | default('') }}"
+              alert_node: "{{ event.alert.labels.node | default('') }}"
+              alert_pod: "{{ event.alert.labels.pod | default('') }}"
+              alert_description: "{{ event.alert.annotations.description | default('Node is not ready') }}"
+              alert_summary: "{{ event.alert.annotations.summary | default('') }}"
+
+    - name: Handle ClusterOperatorDegraded alert
+      condition: >-
+        event.alert.status == "firing"
+        and event.alert.labels.alertname == "ClusterOperatorDegraded"
+      throttle:
+        once_within: 3 hours
+        group_by_attributes:
+          - event.alert.labels.alertname
+          - event.alert.labels.name
+      action:
+        run_workflow_template:
+          name: self-healing-workflow
+          organization: Default
+          job_args:
+            extra_vars:
+              alert_name: "{{ event.alert.labels.alertname }}"
+              alert_severity: "{{ event.alert.labels.severity | default('warning') }}"
+              alert_operator_name: "{{ event.alert.labels.name | default('unknown') }}"
+              alert_namespace: "{{ event.alert.labels.namespace | default('') }}"
+              alert_node: "{{ event.alert.labels.node | default('') }}"
+              alert_pod: "{{ event.alert.labels.pod | default('') }}"
+              alert_description: "{{ event.alert.annotations.description | default('Cluster operator is degraded') }}"
+              alert_summary: "{{ event.alert.annotations.summary | default('') }}"
+
+    - name: Handle NodeFilesystemSpaceFillingUp alert
+      condition: >-
+        event.alert.status == "firing"
+        and event.alert.labels.alertname == "NodeFilesystemSpaceFillingUp"
+      throttle:
+        once_within: 3 hours
+        group_by_attributes:
+          - event.alert.labels.alertname
+          - event.alert.labels.instance
+      action:
+        run_workflow_template:
+          name: self-healing-workflow
+          organization: Default
+          job_args:
+            extra_vars:
+              alert_name: "{{ event.alert.labels.alertname }}"
+              alert_severity: "{{ event.alert.labels.severity | default('warning') }}"
+              alert_namespace: "{{ event.alert.labels.namespace | default('') }}"
+              alert_node: "{{ event.alert.labels.instance | default('') }}"
+              alert_device: "{{ event.alert.labels.device | default('') }}"
+              alert_mountpoint: "{{ event.alert.labels.mountpoint | default('') }}"
+              alert_pod: "{{ event.alert.labels.pod | default('') }}"
+              alert_description: "{{ event.alert.annotations.description | default('Filesystem is filling up') }}"
+              alert_summary: "{{ event.alert.annotations.summary | default('') }}"
+
+    - name: Handle MCPDegraded alert
+      condition: >-
+        event.alert.status == "firing"
+        and event.alert.labels.alertname == "MCPDegraded"
+      throttle:
+        once_within: 3 hours
+        group_by_attributes:
+          - event.alert.labels.alertname
+          - event.alert.labels.name
+      action:
+        run_workflow_template:
+          name: self-healing-workflow
+          organization: Default
+          job_args:
+            extra_vars:
+              alert_name: "{{ event.alert.labels.alertname }}"
+              alert_severity: "{{ event.alert.labels.severity | default('warning') }}"
+              alert_mcp_name: "{{ event.alert.labels.name | default('worker') }}"
+              alert_namespace: "{{ event.alert.labels.namespace | default('') }}"
+              alert_node: "{{ event.alert.labels.node | default('') }}"
+              alert_pod: "{{ event.alert.labels.pod | default('') }}"
+              alert_description: "{{ event.alert.annotations.description | default('MachineConfigPool is degraded') }}"
+              alert_summary: "{{ event.alert.annotations.summary | default('') }}"

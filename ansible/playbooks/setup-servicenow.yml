@@ -1,0 +1,16 @@
+---
+- name: Configure ServiceNow Developer Instance for Self-Healing Agent
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    snow_instance: "{{ snow_instance_url }}"
+    snow_admin_user: "{{ snow_admin_username | default('admin') }}"
+    snow_admin_pass: "{{ snow_admin_password }}"
+    aap_user_name: "svc-aap-automation"
+    ai_user_name: "svc-ai-agent"
+    aap_user_password: "{{ lookup('ansible.builtin.password', '/dev/null length=16 chars=ascii_letters,digits') }}"
+    ai_user_password: "{{ lookup('ansible.builtin.password', '/dev/null length=16 chars=ascii_letters,digits') }}"
+
+  roles:
+    - servicenow_setup

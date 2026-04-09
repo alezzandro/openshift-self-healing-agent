@@ -1,0 +1,9 @@
+---
+snow_instance: ""
+snow_admin_user: "admin"
+snow_admin_pass: ""
+aap_user_name: "svc-aap-automation"
+ai_user_name: "svc-ai-agent"
+aap_user_password: ""
+ai_user_password: ""
+itil_role_sys_id: ""

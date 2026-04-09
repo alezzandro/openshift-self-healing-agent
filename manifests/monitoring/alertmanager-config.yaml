@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-main
+  namespace: openshift-monitoring
+type: Opaque
+stringData:
+  alertmanager.yaml: |
+    global:
+      resolve_timeout: 5m
+
+    route:
+      group_by: ['alertname', 'namespace']
+      group_wait: 10s
+      group_interval: 30s
+      repeat_interval: 4h
+      receiver: 'default'
+      routes:
+        - receiver: 'eda-webhook'
+          matchers:
+            - alertname=~"KubeNodeNotReady|ClusterOperatorDegraded|NodeFilesystemSpaceFillingUp|MCPDegraded"
+          continue: true
+
+    receivers:
+      - name: 'default'
+
+      - name: 'eda-webhook'
+        webhook_configs:
+          - url: 'http://cluster-alert-handler.aap.svc:5000/endpoint'
+            send_resolved: true
+            http_config:
+              tls_config:
+                insecure_skip_verify: true

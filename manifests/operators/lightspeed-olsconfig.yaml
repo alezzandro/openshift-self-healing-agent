@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: proxy-api-keys
+  namespace: openshift-lightspeed
+type: Opaque
+stringData:
+  apitoken: dummytoken
+---
+apiVersion: ols.openshift.io/v1alpha1
+kind: OLSConfig
+metadata:
+  name: cluster
+spec:
+  llm:
+    providers:
+    - credentialsSecretRef:
+        name: proxy-api-keys
+      models:
+      - name: mistral-small-3-1-24b
+        parameters: {}
+      name: LocalLLM
+      type: rhelai_vllm
+      url: http://mistral-small-3-1-24b-predictor.rhoai-project.svc.cluster.local:8000/v1
+  ols:
+    conversationCache:
+      postgres:
+        maxConnections: 2000
+        sharedBuffers: 256MB
+      type: postgres
+    defaultModel: mistral-small-3-1-24b
+    defaultProvider: LocalLLM
+    deployment:
+      api:
+        replicas: 1
+      console:
+        replicas: 1
+      dataCollector: {}
+      database:
+        replicas: 1
+    logLevel: DEBUG
+    toolsApprovalConfig:
+      approvalTimeout: 600
+      approvalType: never
+    userDataCollection: {}
+  olsDataCollector:
+    logLevel: INFO

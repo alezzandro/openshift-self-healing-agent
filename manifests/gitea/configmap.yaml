@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitea-config
+  namespace: gitea
+data:
+  app.ini: |
+    APP_NAME = Self-Healing Agent Gitea
+    RUN_MODE = prod
+
+    [server]
+    PROTOCOL = http
+    DOMAIN = gitea-gitea.apps.CLUSTER_DOMAIN
+    ROOT_URL = https://gitea-gitea.apps.CLUSTER_DOMAIN/
+    HTTP_PORT = 3000
+    DISABLE_SSH = true
+
+    [database]
+    DB_TYPE = sqlite3
+    PATH = /data/gitea/gitea.db
+
+    [repository]
+    ROOT = /data/git/repositories
+    DEFAULT_BRANCH = main
+
+    [security]
+    INSTALL_LOCK = true
+
+    [service]
+    DISABLE_REGISTRATION = false
+    REQUIRE_SIGNIN_VIEW = false
+    DEFAULT_ALLOW_CREATE_ORGANIZATION = true
+
+    [openid]
+    ENABLE_OPENID_SIGNIN = false
+    ENABLE_OPENID_SIGNUP = false
+
+    [log]
+    MODE = console
+    LEVEL = Info

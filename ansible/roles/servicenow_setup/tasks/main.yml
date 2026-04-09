@@ -1,0 +1,334 @@
+---
+- name: Look up the itil role sys_id
+  ansible.builtin.uri:
+    url: "{{ snow_table_api }}/sys_user_role?sysparm_query=name=itil&sysparm_limit=1"
+    method: GET
+    user: "{{ snow_admin_user }}"
+    password: "{{ snow_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      Accept: application/json
+    status_code: 200
+  register: itil_role_result
+
+- name: Set itil role sys_id
+  ansible.builtin.set_fact:
+    itil_role_sys_id: "{{ itil_role_result.json.result[0].sys_id }}"
+
+- name: Look up the snc_platform_rest_api_access role sys_id
+  ansible.builtin.uri:
+    url: "{{ snow_table_api }}/sys_user_role?sysparm_query=name=snc_platform_rest_api_access&sysparm_limit=1"
+    method: GET
+    user: "{{ snow_admin_user }}"
+    password: "{{ snow_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      Accept: application/json
+    status_code: 200
+  register: rest_api_role_result
+
+- name: Set REST API access role sys_id
+  ansible.builtin.set_fact:
+    rest_api_role_sys_id: "{{ (rest_api_role_result.json.result[0].sys_id | default('')) }}"
+
+# ── AAP Service Account ──
+
+- name: Create AAP service account user
+  ansible.builtin.uri:
+    url: "{{ snow_table_api }}/sys_user"
+    method: POST
+    user: "{{ snow_admin_user }}"
+    password: "{{ snow_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      Accept: application/json
+      Content-Type: application/json
+    body_format: json
+    body:
+      user_name: "{{ aap_user_name }}"
+      first_name: "AAP"
+      last_name: "Automation"
+      email: "aap-automation@self-healing-demo.local"
+      user_password: "{{ aap_user_password }}"
+      password_needs_reset: "false"
+      active: "true"
+    status_code: [200, 201]
+  register: aap_user_result
+  ignore_errors: true
+
+- name: Get AAP user sys_id if already exists
+  ansible.builtin.uri:
+    url: "{{ snow_table_api }}/sys_user?sysparm_query=user_name={{ aap_user_name }}&sysparm_limit=1"
+    method: GET
+    user: "{{ snow_admin_user }}"
+    password: "{{ snow_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      Accept: application/json
+    status_code: 200
+  register: aap_user_lookup
+  when: aap_user_result is failed
+
+- name: Set AAP user sys_id
+  ansible.builtin.set_fact:
+    aap_user_sys_id: >-
+      {{ aap_user_result.json.result.sys_id | default(
+         aap_user_lookup.json.result[0].sys_id | default('')) }}
+
+- name: Reset AAP user password and enable API access
+  ansible.builtin.uri:
+    url: "{{ snow_table_api }}/sys_user/{{ aap_user_sys_id }}"
+    method: PATCH
+    user: "{{ snow_admin_user }}"
+    password: "{{ snow_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      Accept: application/json
+      Content-Type: application/json
+    body_format: json
+    body:
+      user_password: "{{ aap_user_password }}"
+      password_needs_reset: "false"
+      locked_out: "false"
+      active: "true"
+      web_service_access_only: "true"
+      internal_integration_user: "true"
+    status_code: [200]
+
+- name: Assign itil role to AAP user
+  ansible.builtin.uri:
+    url: "{{ snow_table_api }}/sys_user_has_role"
+    method: POST
+    user: "{{ snow_admin_user }}"
+    password: "{{ snow_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      Accept: application/json
+      Content-Type: application/json
+    body_format: json
+    body:
+      user: "{{ aap_user_sys_id }}"
+      role: "{{ itil_role_sys_id }}"
+    status_code: [200, 201]
+  ignore_errors: true
+
+- name: Assign REST API access role to AAP user
+  ansible.builtin.uri:
+    url: "{{ snow_table_api }}/sys_user_has_role"
+    method: POST
+    user: "{{ snow_admin_user }}"
+    password: "{{ snow_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      Accept: application/json
+      Content-Type: application/json
+    body_format: json
+    body:
+      user: "{{ aap_user_sys_id }}"
+      role: "{{ rest_api_role_sys_id }}"
+    status_code: [200, 201]
+  ignore_errors: true
+  when: rest_api_role_sys_id | length > 0
+
+# ── AI Agent Service Account ──
+
+- name: Create AI Agent service account user
+  ansible.builtin.uri:
+    url: "{{ snow_table_api }}/sys_user"
+    method: POST
+    user: "{{ snow_admin_user }}"
+    password: "{{ snow_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      Accept: application/json
+      Content-Type: application/json
+    body_format: json
+    body:
+      user_name: "{{ ai_user_name }}"
+      first_name: "AI"
+      last_name: "Agent"
+      email: "ai-agent@self-healing-demo.local"
+      user_password: "{{ ai_user_password }}"
+      password_needs_reset: "false"
+      active: "true"
+    status_code: [200, 201]
+  register: ai_user_result
+  ignore_errors: true
+
+- name: Get AI user sys_id if already exists
+  ansible.builtin.uri:
+    url: "{{ snow_table_api }}/sys_user?sysparm_query=user_name={{ ai_user_name }}&sysparm_limit=1"
+    method: GET
+    user: "{{ snow_admin_user }}"
+    password: "{{ snow_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      Accept: application/json
+    status_code: 200
+  register: ai_user_lookup
+  when: ai_user_result is failed
+
+- name: Set AI user sys_id
+  ansible.builtin.set_fact:
+    ai_user_sys_id: >-
+      {{ ai_user_result.json.result.sys_id | default(
+         ai_user_lookup.json.result[0].sys_id | default('')) }}
+
+- name: Reset AI user password and enable API access
+  ansible.builtin.uri:
+    url: "{{ snow_table_api }}/sys_user/{{ ai_user_sys_id }}"
+    method: PATCH
+    user: "{{ snow_admin_user }}"
+    password: "{{ snow_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      Accept: application/json
+      Content-Type: application/json
+    body_format: json
+    body:
+      user_password: "{{ ai_user_password }}"
+      password_needs_reset: "false"
+      locked_out: "false"
+      active: "true"
+      web_service_access_only: "true"
+      internal_integration_user: "true"
+    status_code: [200]
+
+- name: Assign itil role to AI Agent user
+  ansible.builtin.uri:
+    url: "{{ snow_table_api }}/sys_user_has_role"
+    method: POST
+    user: "{{ snow_admin_user }}"
+    password: "{{ snow_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      Accept: application/json
+      Content-Type: application/json
+    body_format: json
+    body:
+      user: "{{ ai_user_sys_id }}"
+      role: "{{ itil_role_sys_id }}"
+    status_code: [200, 201]
+  ignore_errors: true
+
+- name: Assign REST API access role to AI Agent user
+  ansible.builtin.uri:
+    url: "{{ snow_table_api }}/sys_user_has_role"
+    method: POST
+    user: "{{ snow_admin_user }}"
+    password: "{{ snow_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      Accept: application/json
+      Content-Type: application/json
+    body_format: json
+    body:
+      user: "{{ ai_user_sys_id }}"
+      role: "{{ rest_api_role_sys_id }}"
+    status_code: [200, 201]
+  ignore_errors: true
+  when: rest_api_role_sys_id | length > 0
+
+# ── Verify Service Account Authentication ──
+
+- name: Wait for ServiceNow role propagation
+  ansible.builtin.pause:
+    seconds: 10
+
+- name: Verify AAP service account can authenticate via REST API
+  ansible.builtin.uri:
+    url: "{{ snow_table_api }}/incident?sysparm_limit=1"
+    method: GET
+    user: "{{ aap_user_name }}"
+    password: "{{ aap_user_password }}"
+    force_basic_auth: true
+    headers:
+      Accept: application/json
+    status_code: [200]
+  register: aap_auth_test
+  retries: 5
+  delay: 10
+  until: aap_auth_test.status == 200
+  ignore_errors: true
+
+- name: Set service account sys_ids for impersonation
+  ansible.builtin.set_fact:
+    _snow_aap_sysid: "{{ aap_user_sys_id }}"
+    _snow_ai_sysid: "{{ ai_user_sys_id }}"
+
+- name: Verify admin impersonation works for AAP user
+  ansible.builtin.uri:
+    url: "{{ snow_table_api | regex_replace('/api/now/table', '') }}/api/now/ui/impersonate/{{ aap_user_sys_id }}"
+    method: POST
+    user: "{{ snow_admin_user }}"
+    password: "{{ snow_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      Content-Type: application/json
+      Accept: application/json
+    status_code: [200, 201]
+  register: impersonate_test
+  ignore_errors: true
+
+- name: Display impersonation status
+  ansible.builtin.debug:
+    msg: >-
+      ServiceNow impersonation {{ 'verified' if impersonate_test is not failed else 'FAILED' }}.
+      Admin credentials will authenticate, then impersonate service accounts so that
+      work notes appear under svc-aap-automation and svc-ai-agent in the incident history.
+
+# ── Cleanup demo data ──
+
+- name: Fetch all existing incidents
+  ansible.builtin.uri:
+    url: "{{ snow_table_api }}/incident?sysparm_fields=sys_id,number&sysparm_limit=200"
+    method: GET
+    user: "{{ snow_admin_user }}"
+    password: "{{ snow_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      Accept: application/json
+    status_code: 200
+  register: existing_incidents
+
+- name: Delete all incidents (clean slate for demo)
+  ansible.builtin.uri:
+    url: "{{ snow_table_api }}/incident/{{ item.sys_id }}"
+    method: DELETE
+    user: "{{ snow_admin_user }}"
+    password: "{{ snow_admin_pass }}"
+    force_basic_auth: true
+    headers:
+      Accept: application/json
+    status_code: [200, 204]
+  loop: "{{ existing_incidents.json.result | default([]) }}"
+  loop_control:
+    label: "{{ item.number | default('unknown') }}"
+
+- name: Write credentials to local file
+  ansible.builtin.copy:
+    dest: "{{ playbook_dir }}/../../setup/.servicenow-credentials.env"
+    mode: "0600"
+    content: |
+      # ServiceNow credentials -- generated by setup-servicenow.yml
+      # DO NOT COMMIT THIS FILE
+      # Auth: admin creds for API auth + impersonation of service accounts
+      SNOW_INSTANCE='{{ snow_instance }}'
+      SNOW_ADMIN_USERNAME='{{ snow_admin_user }}'
+      SNOW_ADMIN_PASSWORD='{{ snow_admin_pass }}'
+      SNOW_AAP_USERNAME='{{ aap_user_name }}'
+      SNOW_AAP_PASSWORD='{{ aap_user_password }}'
+      SNOW_AAP_USER_SYSID='{{ _snow_aap_sysid }}'
+      SNOW_AI_USERNAME='{{ ai_user_name }}'
+      SNOW_AI_PASSWORD='{{ ai_user_password }}'
+      SNOW_AI_USER_SYSID='{{ _snow_ai_sysid }}'
+
+- name: Display summary
+  ansible.builtin.debug:
+    msg: |
+      ServiceNow setup complete:
+        Instance: {{ snow_instance }}
+        Auth method: admin + impersonation (service accounts appear as work note authors)
+        Service accounts created: {{ aap_user_name }} ({{ _snow_aap_sysid }}), {{ ai_user_name }} ({{ _snow_ai_sysid }})
+        Incidents purged: {{ existing_incidents.json.result | default([]) | length }}
+        Credentials saved to: setup/.servicenow-credentials.env

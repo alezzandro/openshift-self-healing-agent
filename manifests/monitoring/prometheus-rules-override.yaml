@@ -1,0 +1,73 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: self-healing-demo-overrides
+  namespace: openshift-monitoring
+  labels:
+    role: alert-rules
+spec:
+  groups:
+    - name: self-healing-demo.node.rules
+      rules:
+        - alert: KubeNodeNotReady
+          annotations:
+            description: >-
+              {{ $labels.node }} has been unready for more than 1 minute.
+            summary: Node is not ready.
+          expr: |
+            kube_node_status_condition{job="kube-state-metrics",condition="Ready",status="true"} == 0
+          for: 1m
+          labels:
+            severity: warning
+
+    - name: self-healing-demo.operator.rules
+      rules:
+        - alert: ClusterOperatorDegraded
+          annotations:
+            description: >-
+              Cluster operator {{ $labels.name }} has been degraded for 1 minute.
+              Operator is reporting a degraded condition.
+            summary: Cluster operator is degraded.
+          expr: |
+            cluster_operator_conditions{condition="Degraded"} == 1
+          for: 1m
+          labels:
+            severity: warning
+
+    - name: self-healing-demo.disk.rules
+      rules:
+        - alert: NodeFilesystemSpaceFillingUp
+          annotations:
+            description: >-
+              Filesystem on {{ $labels.device }} at {{ $labels.mountpoint }}
+              on node {{ $labels.instance }} has less than 15% space remaining
+              and is predicted to fill up within 4 hours.
+            summary: Filesystem is predicted to run out of space within 4 hours.
+          expr: |
+            (
+              node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""} / node_filesystem_size_bytes{job="node-exporter"} < 0.15
+              and
+              predict_linear(node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""}[6h], 4*60*60) < 0
+            )
+          for: 1m
+          labels:
+            severity: warning
+
+    - name: self-healing-demo.mcp.rules
+      rules:
+        - alert: MCPDegraded
+          annotations:
+            description: >-
+              MachineConfigPool {{ $labels.name }} has been degraded for more
+              than 1 minute. The Machine Config Operator cannot render or apply
+              the desired configuration.
+            summary: MachineConfigPool is degraded.
+          expr: |
+            label_replace(
+              max by (pool) (mco_state{state=~"Degraded|RenderDegraded"})
+                > max by (pool) (mco_state{state="Updated"}),
+              "name", "$1", "pool", "(.*)"
+            )
+          for: 1m
+          labels:
+            severity: warning

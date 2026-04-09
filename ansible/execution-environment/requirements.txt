@@ -1,0 +1,5 @@
+kubernetes>=28.0.0
+openshift-client>=1.0.0
+requests>=2.31.0
+pysnow>=0.7.17
+jmespath>=1.0.1

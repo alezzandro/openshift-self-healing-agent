@@ -1,0 +1,84 @@
+---
+- name: Check knowledge base for similar past incidents
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Set safe defaults for alert variables
+      ansible.builtin.set_fact:
+        alert_name: "{{ alert_name | default('Unknown') }}"
+        alert_description: "{{ alert_description | default('') }}"
+        diagnostics: "{{ diagnostics | default({}) }}"
+        aap_controller_host: "{{ aap_controller_host | default('') }}"
+        aap_controller_username: "{{ aap_controller_username | default('admin') }}"
+        aap_controller_password: "{{ aap_controller_password | default('') }}"
+
+    - name: Build expected remediation template name
+      ansible.builtin.set_fact:
+        expected_jt_name: "Remediate {{ alert_name }}"
+
+    - name: Search AAP for an existing remediation Job Template
+      ansible.builtin.uri:
+        url: "{{ aap_controller_host }}/api/controller/v2/job_templates/?name={{ expected_jt_name | urlencode }}"
+        method: GET
+        user: "{{ aap_controller_username }}"
+        password: "{{ aap_controller_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        headers:
+          Accept: application/json
+        status_code: 200
+      register: jt_lookup
+      when: aap_controller_host | length > 0
+
+    - name: Evaluate whether a known resolution exists
+      ansible.builtin.set_fact:
+        has_knowledge_base_match: "{{ jt_lookup.json.results | default([]) | length > 0 }}"
+      when: jt_lookup is succeeded
+
+    - name: Build knowledge base match from JT data
+      ansible.builtin.set_fact:
+        knowledge_base_match:
+          job_template_name: "{{ jt_lookup.json.results[0].name }}"
+          job_template_id: "{{ jt_lookup.json.results[0].id }}"
+          extra_vars_schema: "{{ jt_lookup.json.results[0].extra_vars | default('{}') | from_yaml }}"
+          rca: "Previously resolved. See the existing Job Template and playbook."
+      when:
+        - jt_lookup is succeeded
+        - jt_lookup.json.results | default([]) | length > 0
+
+    - name: Set empty match when no JT found
+      ansible.builtin.set_fact:
+        knowledge_base_match: {}
+      when: not (has_knowledge_base_match | default(false) | bool)
+
+    - name: Default to no match when AAP lookup was skipped
+      ansible.builtin.set_fact:
+        has_knowledge_base_match: "false"
+        knowledge_base_match: {}
+      when: jt_lookup is skipped or jt_lookup is failed
+
+    - name: Display knowledge base result
+      ansible.builtin.debug:
+        msg: >-
+          {% if has_knowledge_base_match | bool %}
+          MATCH FOUND: Existing Job Template "{{ expected_jt_name }}" found in AAP (ID: {{ knowledge_base_match.job_template_id | default('?') }}).
+          The known-incident path will be used.
+          {% else %}
+          NO MATCH: No existing "{{ expected_jt_name }}" template found. This is a new incident type.
+          AI will generate a fresh RCA and remediation playbook.
+          {% endif %}
+
+    - name: Set stats for workflow branching
+      ansible.builtin.set_stats:
+        data:
+          has_knowledge_base_match: "{{ has_knowledge_base_match }}"
+          knowledge_base_match: "{{ knowledge_base_match }}"
+        per_host: false
+
+    - name: Signal known incident to workflow (fail = route to known-incident path)
+      ansible.builtin.fail:
+        msg: >-
+          Known resolution found — routing to auto-remediation path.
+          Job Template: {{ expected_jt_name }}
+      when: has_knowledge_base_match | bool

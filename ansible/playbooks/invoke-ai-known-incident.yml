@@ -1,0 +1,270 @@
+---
+- name: Invoke AI agent for known incident (auto-remediation)
+  hosts: localhost
+  gather_facts: false
+
+  roles:
+    - role: llamastack_common
+
+  tasks:
+    - name: Set safe defaults for alert variables
+      ansible.builtin.set_fact:
+        alert_name: "{{ alert_name | default('Unknown') }}"
+        alert_description: "{{ alert_description | default('') }}"
+        alert_severity: "{{ alert_severity | default('warning') }}"
+        alert_namespace: "{{ alert_namespace | default('') }}"
+        alert_node: "{{ alert_node | default('') }}"
+        alert_operator_name: "{{ alert_operator_name | default('') }}"
+        diagnostics: "{{ diagnostics | default({}) }}"
+        snow_incident_number: "{{ snow_incident_number | default('') }}"
+        snow_instance_url: "{{ snow_instance_url | default('') }}"
+        snow_admin_username: "{{ snow_admin_username | default('admin') }}"
+        snow_admin_password: "{{ snow_admin_password | default('') }}"
+        snow_ai_user_sysid: "{{ snow_ai_user_sysid | default('') }}"
+        knowledge_base_match: "{{ knowledge_base_match | default({}) }}"
+        aap_controller_host: "{{ aap_controller_host | default('') }}"
+        aap_controller_username: "{{ aap_controller_username | default('admin') }}"
+        aap_controller_password: "{{ aap_controller_password | default('') }}"
+
+    - name: Render system prompt for known incident
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/system-prompt-known-incident.j2"
+        dest: /tmp/system-prompt-known.txt
+      delegate_to: localhost
+
+    - name: Read rendered system prompt
+      ansible.builtin.slurp:
+        src: /tmp/system-prompt-known.txt
+      register: system_prompt_content
+
+    # ── Step 1: AI confirms known issue and derives extra_vars ──
+
+    - name: Call LlamaStack to confirm match and derive extra_vars
+      ansible.builtin.uri:
+        url: "{{ llamastack_url }}/v1/chat/completions"
+        method: POST
+        body_format: json
+        body:
+          model: "{{ llamastack_model }}"
+          messages:
+            - role: system
+              content: "{{ system_prompt_content.content | b64decode }}"
+            - role: user
+              content: >-
+                This is a recurring alert. Confirm the issue matches the known pattern,
+                then provide the ---EXTRA_VARS--- JSON with the correct values for this
+                specific incident.
+                Alert: {{ alert_name }}.
+                Node: {{ alert_node | default('N/A') }}.
+                Namespace: {{ alert_namespace | default('N/A') }}.
+                Not-ready nodes: {{ diagnostics.not_ready_nodes | default([]) | join(', ') | default('None') }}.
+                Degraded operators: {{ diagnostics.degraded_operator_names | default([]) | join(', ') | default('None') }}.
+          max_tokens: 512
+          temperature: 0.2
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+        timeout: "{{ llamastack_timeout }}"
+        status_code: [200]
+      register: ai_response
+
+    - name: Extract AI response text
+      ansible.builtin.set_fact:
+        ai_full_text: "{{ ai_response.json.choices[0].message.content | default('Known issue confirmed.') | trim }}"
+
+    - name: Parse assessment and extra_vars from AI response
+      ansible.builtin.set_fact:
+        ai_text: "{{ (ai_full_text.split('---EXTRA_VARS---')[0]) | trim }}"
+        ai_extra_vars_json: "{{ (ai_full_text.split('---EXTRA_VARS---')[1]) | trim }}"
+      when: "'---EXTRA_VARS---' in ai_full_text"
+
+    - name: Use full text as assessment when no extra_vars marker found
+      ansible.builtin.set_fact:
+        ai_text: "{{ ai_full_text }}"
+        ai_extra_vars_json: ""
+      when: "'---EXTRA_VARS---' not in ai_full_text"
+
+    - name: Clean extra_vars JSON string
+      ansible.builtin.set_fact:
+        ai_extra_vars_clean: >-
+          {{ ai_extra_vars_json
+             | regex_replace('(?s)^```[a-zA-Z]*\n?', '')
+             | regex_replace('(?s)\n?```\s*$', '')
+             | trim
+             | regex_replace("'", '"')
+             | regex_replace('(\{|,)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', '\1 "\2":')
+          }}
+      when: ai_extra_vars_json | default('') | trim | length > 0
+
+    - name: Parse extra_vars into a dict
+      ansible.builtin.set_fact:
+        ai_extra_vars: "{{ ai_extra_vars_clean if ai_extra_vars_clean is mapping else (ai_extra_vars_clean | from_json) }}"
+      when: ai_extra_vars_clean is defined and ai_extra_vars_clean | length > 0
+      ignore_errors: true
+
+    - name: Fall back to building extra_vars from alert context
+      ansible.builtin.set_fact:
+        ai_extra_vars: >-
+          {{ {'target_node': alert_node} if alert_node | default('') | length > 0
+             else ({'target_operator': alert_operator_name} if alert_operator_name | default('') | length > 0
+             else {}) }}
+      when: ai_extra_vars is not defined
+
+    - name: Display AI analysis for known incident
+      ansible.builtin.debug:
+        msg: |
+          === AI Known Incident Analysis ===
+          {{ ai_text | truncate(400) }}
+          === Extra Vars for Launch ===
+          {{ ai_extra_vars | default({}) }}
+
+    # ── Step 2: Look up and launch the existing Job Template ──
+
+    - name: Look up the known Job Template by name
+      ansible.builtin.uri:
+        url: "{{ aap_controller_host }}/api/controller/v2/job_templates/?name={{ knowledge_base_match.job_template_name | default('') | urlencode }}"
+        method: GET
+        user: "{{ aap_controller_username }}"
+        password: "{{ aap_controller_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        headers:
+          Accept: application/json
+        status_code: 200
+      register: jt_lookup
+      when:
+        - aap_controller_host | length > 0
+        - knowledge_base_match.job_template_name | default('') | length > 0
+
+    - name: Launch the existing Job Template with computed extra_vars
+      ansible.builtin.uri:
+        url: "{{ aap_controller_host }}/api/controller/v2/job_templates/{{ jt_lookup.json.results[0].id }}/launch/"
+        method: POST
+        user: "{{ aap_controller_username }}"
+        password: "{{ aap_controller_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+        body_format: json
+        body:
+          extra_vars: "{{ ai_extra_vars | default({}) | to_nice_yaml }}"
+        status_code: [200, 201, 202]
+      register: jt_launch_result
+      when:
+        - jt_lookup is not skipped
+        - jt_lookup.json.results | default([]) | length > 0
+      ignore_errors: true
+
+    - name: Wait for launched job to complete
+      ansible.builtin.uri:
+        url: "{{ aap_controller_host }}/api/controller/v2/jobs/{{ jt_launch_result.json.id }}/"
+        method: GET
+        user: "{{ aap_controller_username }}"
+        password: "{{ aap_controller_password }}"
+        force_basic_auth: true
+        validate_certs: false
+        headers:
+          Accept: application/json
+        status_code: 200
+      register: job_status
+      until: job_status.json.status | default('') in ['successful', 'failed', 'error', 'canceled']
+      retries: 60
+      delay: 10
+      when:
+        - jt_launch_result is not skipped
+        - jt_launch_result is not failed
+
+    # ── Step 3: Impersonate svc-ai-agent and update ServiceNow ──
+
+    - name: Start impersonation session as svc-ai-agent
+      ansible.builtin.uri:
+        url: "{{ snow_instance_url }}/api/now/ui/impersonate/{{ snow_ai_user_sysid }}"
+        method: POST
+        user: "{{ snow_admin_username }}"
+        password: "{{ snow_admin_password }}"
+        force_basic_auth: true
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+        status_code: [200, 201]
+      register: ai_impersonate_result
+      when:
+        - snow_instance_url | length > 0
+        - snow_ai_user_sysid | length > 0
+
+    - name: Extract AI agent session cookie
+      ansible.builtin.set_fact:
+        snow_ai_cookie: "{{ ai_impersonate_result.cookies_string | default('') }}"
+      when: ai_impersonate_result is not skipped
+
+    - name: Look up ServiceNow incident
+      ansible.builtin.uri:
+        url: "{{ snow_instance_url }}/api/now/table/incident?sysparm_query=number={{ snow_incident_number }}"
+        method: GET
+        headers:
+          Accept: application/json
+          Cookie: "{{ snow_ai_cookie | default('') }}"
+        status_code: 200
+      register: snow_incident_lookup
+      when: snow_incident_number | length > 0
+
+    - name: Build job execution status summary
+      ansible.builtin.set_fact:
+        job_result_summary: >-
+          {% if jt_launch_result is defined and jt_launch_result is not skipped and jt_launch_result is not failed %}
+          Job #{{ jt_launch_result.json.id | default('?') }} launched successfully.
+          {% if job_status is defined and job_status is not skipped %}
+          Final status: {{ job_status.json.status | default('unknown') }}.
+          {% endif %}
+          {% else %}
+          Job Template could not be launched automatically. Manual execution required.
+          {% endif %}
+
+    - name: Update incident noting known issue and auto-remediation
+      ansible.builtin.uri:
+        url: "{{ snow_instance_url }}/api/now/table/incident/{{ snow_incident_lookup.json.result[0].sys_id }}"
+        method: PATCH
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+          Cookie: "{{ snow_ai_cookie | default('') }}"
+        body_format: json
+        body:
+          work_notes: |
+            [AI Auto-Remediation - Known Issue Detected]
+            The AI agent has identified this as a recurring issue with a known resolution.
+
+            AI ASSESSMENT
+            {{ ai_text }}
+
+            EXISTING RESOLUTION
+            - Job Template: {{ knowledge_base_match.job_template_name | default('N/A') }}
+            - Previous RCA: {{ knowledge_base_match.rca | default('See previous incident records') | truncate(300) }}
+
+            EXTRA VARIABLES USED
+            {% for k, v in (ai_extra_vars | default({})).items() %}
+            - {{ k }}: {{ v }}
+            {% endfor %}
+
+            EXECUTION RESULT
+            {{ job_result_summary }}
+
+            The remediation was applied automatically using the existing Job Template
+            with AI-derived extra variables. Monitor the AAP Console at
+            {{ aap_controller_host | default('AAP') }} for detailed execution logs.
+        status_code: [200]
+      when:
+        - snow_incident_number | length > 0
+        - snow_incident_lookup.json.result | length > 0
+
+    - name: Set stats with AI response
+      ansible.builtin.set_stats:
+        data:
+          ai_response_text: "{{ ai_text }}"
+          ai_response_status: "auto-remediated"
+          ai_extra_vars: "{{ ai_extra_vars | default({}) }}"
+          auto_launch_job_id: "{{ jt_launch_result.json.id | default('') }}"
+          auto_launch_status: "{{ job_status.json.status | default('not_launched') }}"
+        per_host: false

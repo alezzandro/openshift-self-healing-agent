@@ -1,0 +1,52 @@
+apiVersion: nvidia.com/v1
+kind: ClusterPolicy
+metadata:
+  name: gpu-cluster-policy
+spec:
+  operator:
+    defaultRuntime: crio
+  daemonsets: {}
+  dcgmExporter:
+    enabled: true
+  dcgm:
+    enabled: true
+  devicePlugin: {}
+  driver:
+    enabled: true
+    repoConfig:
+      configMapName: ""
+    certConfig:
+      name: ""
+    licensingConfig:
+      nlsEnabled: false
+      configMapName: ""
+    upgradePolicy:
+      autoUpgrade: true
+      maxParallelUpgrades: 1
+      maxUnavailable: 25%
+      waitForCompletion:
+        timeoutSeconds: 0
+  gfd: {}
+  migManager:
+    enabled: false
+  nodeStatusExporter:
+    enabled: true
+  mig:
+    strategy: single
+  sandboxDevicePlugin:
+    enabled: false
+  sandboxWorkloads:
+    enabled: false
+  toolkit:
+    enabled: true
+  validator:
+    plugin:
+      env:
+        - name: WITH_WORKLOAD
+          value: "false"
+  vfioManager:
+    enabled: false
+  vgpuDeviceManager:
+    enabled: false
+  vgpuManager:
+    enabled: false

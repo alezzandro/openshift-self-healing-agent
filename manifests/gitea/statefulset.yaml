@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: gitea
+  namespace: gitea
+  labels:
+    app: gitea
+spec:
+  replicas: 1
+  serviceName: gitea
+  selector:
+    matchLabels:
+      app: gitea
+  template:
+    metadata:
+      labels:
+        app: gitea
+    spec:
+      securityContext:
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: gitea
+          image: docker.io/gitea/gitea:1.22-rootless
+          ports:
+            - containerPort: 3000
+              name: http
+              protocol: TCP
+          env:
+            - name: GITEA__database__DB_TYPE
+              value: sqlite3
+            - name: GITEA__database__PATH
+              value: /var/lib/gitea/gitea.db
+            - name: GITEA__server__HTTP_PORT
+              value: "3000"
+            - name: GITEA__server__APP_DATA_PATH
+              value: /var/lib/gitea
+            - name: GITEA__security__INSTALL_LOCK
+              value: "true"
+            - name: GITEA__service__DISABLE_REGISTRATION
+              value: "false"
+            - name: GITEA__server__DISABLE_SSH
+              value: "true"
+            - name: GITEA__repository__DEFAULT_BRANCH
+              value: main
+            - name: HOME
+              value: /var/lib/gitea
+            - name: GITEA_WORK_DIR
+              value: /var/lib/gitea
+          volumeMounts:
+            - name: gitea-data
+              mountPath: /var/lib/gitea
+            - name: gitea-config
+              mountPath: /etc/gitea
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /api/v1/version
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/v1/version
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: gitea-data
+          persistentVolumeClaim:
+            claimName: gitea-data
+        - name: gitea-config
+          emptyDir: {}

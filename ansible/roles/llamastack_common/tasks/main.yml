@@ -1,0 +1,28 @@
+---
+- name: Validate LlamaStack connectivity
+  ansible.builtin.uri:
+    url: "{{ llamastack_url }}/v1/version"
+    method: GET
+    timeout: 30
+    status_code: 200
+  register: llamastack_health
+
+- name: Verify model availability
+  ansible.builtin.uri:
+    url: "{{ llamastack_url }}/v1/models"
+    method: GET
+    timeout: 30
+    headers:
+      Accept: application/json
+    status_code: 200
+  register: llamastack_models
+
+- name: Extract model IDs from response
+  ansible.builtin.set_fact:
+    _available_models: "{{ llamastack_models.json.data | default(llamastack_models.json) | map(attribute='id') | list }}"
+
+- name: Confirm target model is registered
+  ansible.builtin.assert:
+    that:
+      - _available_models | select('search', llamastack_model) | list | length > 0
+    fail_msg: "Model '{{ llamastack_model }}' not found in LlamaStack. Available: {{ _available_models }}"

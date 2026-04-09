@@ -1,0 +1,10 @@
+---
+collections:
+  - name: kubernetes.core
+    version: ">=3.0.0"
+  - name: redhat.openshift
+    version: ">=3.0.0"
+  - name: servicenow.itsm
+    version: ">=2.6.0"
+  - name: ansible.controller
+    version: ">=4.0.0"

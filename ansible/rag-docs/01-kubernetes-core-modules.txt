@@ -1,0 +1,132 @@
+# kubernetes.core.k8s_info Module Reference
+
+The kubernetes.core.k8s_info module retrieves information about Kubernetes resources.
+It runs on localhost and picks up cluster credentials from environment variables
+(K8S_AUTH_HOST, K8S_AUTH_API_KEY) when used in AAP with an attached OpenShift credential.
+
+## Parameters
+- api_version: API version (e.g. v1, apps/v1, machine.openshift.io/v1beta1)
+- kind: Resource kind (e.g. Node, Pod, Deployment, Machine, MachineSet, ClusterOperator)
+- name: (optional) specific resource name
+- namespace: (optional) namespace for namespaced resources
+- label_selectors: (optional) list of label selectors
+- field_selectors: (optional) list of field selectors
+
+## Example: Get all nodes
+    - name: Get all nodes
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Node
+      register: all_nodes
+
+## Example: Get a specific node
+    - name: Get node details
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Node
+        name: ip-10-0-1-1.example.internal
+      register: node_info
+
+## Example: Get pods on a specific node
+    - name: Get pods on affected node
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        field_selectors:
+          - spec.nodeName=ip-10-0-1-1.example.internal
+      register: node_pods
+
+## Example: Get OpenShift Machines
+    - name: Get all machines
+      kubernetes.core.k8s_info:
+        api_version: machine.openshift.io/v1beta1
+        kind: Machine
+        namespace: openshift-machine-api
+      register: machines
+
+## Example: Get ClusterOperator status
+    - name: Get cluster operator status
+      kubernetes.core.k8s_info:
+        api_version: config.openshift.io/v1
+        kind: ClusterOperator
+        name: ingress
+      register: operator_info
+
+# kubernetes.core.k8s Module Reference
+
+The kubernetes.core.k8s module manages Kubernetes resources (create, patch, delete).
+It also picks up cluster credentials automatically from environment variables.
+
+## Parameters
+- api_version: API version
+- kind: Resource kind
+- name: Resource name
+- namespace: (optional) for namespaced resources
+- state: present or absent
+- definition: (optional) full or partial resource definition for create/patch
+
+## Example: Delete a pod
+    - name: Delete pod to force restart
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Pod
+        namespace: openshift-dns
+        name: dns-default-abc123
+        state: absent
+
+## Example: Delete a Machine to trigger MachineSet replacement
+    - name: Delete Machine for MachineSet replacement
+      kubernetes.core.k8s:
+        api_version: machine.openshift.io/v1beta1
+        kind: Machine
+        namespace: openshift-machine-api
+        name: my-cluster-worker-abc123
+        state: absent
+
+## Example: Scale a deployment
+    - name: Scale deployment replicas
+      kubernetes.core.k8s:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: openshift-ingress
+        name: router-default
+        state: present
+        definition:
+          spec:
+            replicas: 2
+
+## Example: Patch a node to remove taints
+    - name: Remove taints from node
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Node
+        name: my-node
+        state: present
+        definition:
+          spec:
+            taints: []
+
+# kubernetes.core.k8s_drain Module Reference
+
+The kubernetes.core.k8s_drain module cordons, uncordons, or drains Kubernetes nodes.
+
+## Parameters
+- name: Node name
+- state: cordon, uncordon, or drain
+- delete_options: (for drain) delete_emptydir_data, ignore_daemonsets, force
+
+## Example: Uncordon a node
+    - name: Uncordon node
+      kubernetes.core.k8s_drain:
+        name: ip-10-0-1-1.example.internal
+        state: uncordon
+
+## Example: Drain a node
+    - name: Drain node before maintenance
+      kubernetes.core.k8s_drain:
+        name: ip-10-0-1-1.example.internal
+        state: drain
+        delete_options:
+          delete_emptydir_data: true
+          ignore_daemonsets: true
+          force: true

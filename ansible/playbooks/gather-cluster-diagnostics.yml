@@ -1,0 +1,258 @@
+---
+- name: Gather cluster diagnostics for the alerting event
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Set safe defaults for alert variables
+      ansible.builtin.set_fact:
+        alert_name: "{{ alert_name | default('Unknown') }}"
+        alert_namespace: "{{ alert_namespace | default('') }}"
+        alert_node: "{{ alert_node | default('') }}"
+        alert_pod: "{{ alert_pod | default('') }}"
+        alert_operator_name: "{{ alert_operator_name | default('') }}"
+        alert_description: "{{ alert_description | default('') }}"
+        alert_severity: "{{ alert_severity | default('warning') }}"
+        alert_summary: "{{ alert_summary | default('') }}"
+        alert_device: "{{ alert_device | default('') }}"
+        alert_mountpoint: "{{ alert_mountpoint | default('') }}"
+        alert_mcp_name: "{{ alert_mcp_name | default('') }}"
+
+    - name: Collect node status
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Node
+      register: all_nodes
+
+    - name: Identify unhealthy nodes
+      ansible.builtin.set_fact:
+        unhealthy_nodes: >-
+          {{ all_nodes.resources | selectattr('status.conditions', 'defined') |
+             map(attribute='metadata.name') | list }}
+        node_conditions: >-
+          {{ all_nodes.resources | map('combine', {})  | list }}
+
+    - name: Collect cluster operators status
+      kubernetes.core.k8s_info:
+        api_version: config.openshift.io/v1
+        kind: ClusterOperator
+      register: cluster_operators
+
+    - name: Identify degraded operators
+      ansible.builtin.set_fact:
+        degraded_operators: >-
+          {{ cluster_operators.resources |
+             selectattr('status.conditions', 'defined') |
+             list }}
+
+    - name: Collect events from the alert namespace
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Event
+        namespace: "{{ alert_namespace }}"
+      register: namespace_events
+      when: alert_namespace | length > 0
+
+    - name: Collect cluster-scoped events for node alerts
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Event
+        namespace: default
+      register: cluster_events
+      when: alert_name == "KubeNodeNotReady"
+
+    - name: Collect specific node details
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Node
+        name: "{{ alert_node }}"
+      register: target_node_info
+      when: alert_node | length > 0
+
+    - name: Collect pods on the affected node
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        field_selectors:
+          - "spec.nodeName={{ alert_node }}"
+      register: node_pods
+      when: alert_node | length > 0
+
+    - name: Collect specific operator details
+      kubernetes.core.k8s_info:
+        api_version: config.openshift.io/v1
+        kind: ClusterOperator
+        name: "{{ alert_operator_name }}"
+      register: target_operator_info
+      when: alert_operator_name | length > 0
+
+    - name: Collect OAuth configuration
+      kubernetes.core.k8s_info:
+        api_version: config.openshift.io/v1
+        kind: OAuth
+        name: cluster
+      register: oauth_config
+      when: alert_operator_name == "authentication"
+
+    - name: Collect authentication operator pods
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: openshift-authentication-operator
+      register: auth_operator_pods
+      when: alert_operator_name == "authentication"
+
+    - name: Collect OAuth server pods
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: openshift-authentication
+      register: oauth_server_pods
+      when: alert_operator_name == "authentication"
+
+    - name: Collect MachineConfigPool status
+      kubernetes.core.k8s_info:
+        api_version: machineconfiguration.openshift.io/v1
+        kind: MachineConfigPool
+      register: mcp_list
+      when: alert_name == "MCPDegraded"
+
+    - name: Collect recent MachineConfigs
+      kubernetes.core.k8s_info:
+        api_version: machineconfiguration.openshift.io/v1
+        kind: MachineConfig
+      register: mc_list
+      when: alert_name == "MCPDegraded"
+
+    - name: Collect node filesystem events
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Event
+        namespace: default
+      register: disk_events
+      when: alert_name == "NodeFilesystemSpaceFillingUp"
+
+    - name: Calculate not-ready node names
+      ansible.builtin.set_fact:
+        _not_ready_nodes: "{{ _not_ready_nodes | default([]) + [item.metadata.name] }}"
+      loop: "{{ all_nodes.resources }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+      when: >-
+        item.status.conditions | default([]) |
+        selectattr('type', 'equalto', 'Ready') |
+        selectattr('status', 'equalto', 'False') | list | length > 0
+      no_log: true
+
+    - name: Calculate degraded operator names
+      ansible.builtin.set_fact:
+        _degraded_ops: "{{ _degraded_ops | default([]) + [item.metadata.name] }}"
+      loop: "{{ cluster_operators.resources }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+      when: >-
+        item.status.conditions | default([]) |
+        selectattr('type', 'equalto', 'Degraded') |
+        selectattr('status', 'equalto', 'True') | list | length > 0
+      no_log: true
+
+    - name: Build diagnostics data (machine-readable)
+      ansible.builtin.set_fact:
+        diagnostics:
+          alert_name: "{{ alert_name }}"
+          alert_description: "{{ alert_description }}"
+          alert_namespace: "{{ alert_namespace }}"
+          alert_node: "{{ alert_node }}"
+          alert_pod: "{{ alert_pod }}"
+          alert_operator_name: "{{ alert_operator_name }}"
+          node_count: "{{ all_nodes.resources | length }}"
+          not_ready_nodes: "{{ _not_ready_nodes | default([]) }}"
+          target_node: "{{ (target_node_info.resources | default([]))[0] | default({}) | to_json }}"
+          degraded_operator_names: "{{ _degraded_ops | default([]) }}"
+          target_operator: "{{ (target_operator_info.resources | default([]))[0] | default({}) | to_json }}"
+          recent_events: "{{ (namespace_events.resources | default([]))[:20] | to_json }}"
+          oauth_config: "{{ (oauth_config.resources | default([]))[0] | default({}) | to_json }}"
+          auth_operator_pod_count: "{{ (auth_operator_pods.resources | default([])) | length }}"
+          oauth_server_pod_count: "{{ (oauth_server_pods.resources | default([])) | length }}"
+          mcp_status: "{{ (mcp_list.resources | default([])) | map('combine', {}) | list | to_json }}"
+          mc_names: "{{ (mc_list.resources | default([])) | map(attribute='metadata.name') | list | to_json }}"
+          alert_device: "{{ alert_device | default('') }}"
+          alert_mountpoint: "{{ alert_mountpoint | default('') }}"
+          alert_mcp_name: "{{ alert_mcp_name | default('') }}"
+
+    - name: Build node status table for human summary
+      ansible.builtin.set_fact:
+        _node_lines: >-
+          {{ _node_lines | default([]) + [
+            item.metadata.name ~ '  |  ' ~
+            (item.status.conditions | selectattr('type', 'equalto', 'Ready') | map(attribute='status') | first | default('Unknown')) ~
+            ((' (NotReady)') if item.metadata.name in (_not_ready_nodes | default([])) else '')
+          ] }}
+      loop: "{{ all_nodes.resources }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+      no_log: true
+
+    - name: Build recent events lines for human summary
+      ansible.builtin.set_fact:
+        _event_lines: >-
+          {{ (namespace_events.resources | default(cluster_events.resources | default([])))[:5] |
+             map(attribute='message') | list }}
+
+    - name: Build human-readable diagnostics summary
+      ansible.builtin.set_fact:
+        diagnostics_summary: |
+          CLUSTER DIAGNOSTICS REPORT
+          ==========================
+          Alert: {{ alert_name }} ({{ alert_severity | default('warning') }})
+          Description: {{ alert_description }}
+
+          NODE STATUS ({{ all_nodes.resources | length }} total)
+          -------------------------------------------
+          {% for line in _node_lines | default([]) %}
+          {{ line }}
+          {% endfor %}
+
+          {% if _not_ready_nodes | default([]) | length > 0 %}
+          Not-Ready Nodes: {{ _not_ready_nodes | join(', ') }}
+          {% else %}
+          All nodes are Ready.
+          {% endif %}
+
+          {% if alert_node | length > 0 %}
+          AFFECTED NODE: {{ alert_node }}
+          {% endif %}
+
+          DEGRADED OPERATORS
+          -------------------------------------------
+          {% if _degraded_ops | default([]) | length > 0 %}
+          {% for op in _degraded_ops %}
+          - {{ op }}
+          {% endfor %}
+          {% else %}
+          No degraded operators detected.
+          {% endif %}
+
+          {% if alert_operator_name | length > 0 %}
+          AFFECTED OPERATOR: {{ alert_operator_name }}
+          {% endif %}
+
+          RECENT CLUSTER EVENTS (last 5)
+          -------------------------------------------
+          {% for evt in _event_lines | default([]) %}
+          - {{ evt | truncate(120) }}
+          {% endfor %}
+          {% if _event_lines | default([]) | length == 0 %}
+          No recent events collected.
+          {% endif %}
+
+    - name: Display diagnostics summary
+      ansible.builtin.debug:
+        var: diagnostics
+
+    - name: Set stats for downstream workflow steps
+      ansible.builtin.set_stats:
+        data:
+          diagnostics: "{{ diagnostics }}"
+          diagnostics_summary: "{{ diagnostics_summary }}"
+        per_host: false

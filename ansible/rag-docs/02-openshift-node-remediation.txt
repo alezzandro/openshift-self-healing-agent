@@ -1,0 +1,81 @@
+# OpenShift Node Not Ready Remediation
+
+When a node enters NotReady state the kubelet has stopped sending heartbeats.
+Common causes: kubelet process stopped, node network failure, kernel panic,
+resource exhaustion (disk, memory), or underlying VM/instance failure.
+
+## Remediation procedure using kubernetes.core Ansible modules
+
+Step 1 — Check node status:
+    - name: Get current status of the affected node
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Node
+        name: "TARGET_NODE_NAME"
+      register: node_info
+
+Step 2 — If node is cordoned (spec.unschedulable=true), uncordon it:
+    - name: Uncordon node if cordoned
+      kubernetes.core.k8s_drain:
+        name: "TARGET_NODE_NAME"
+        state: uncordon
+      when: node_info.resources[0].spec.unschedulable | default(false)
+
+Step 3 — Find the Machine object backing this node:
+    - name: Get all worker machines
+      kubernetes.core.k8s_info:
+        api_version: machine.openshift.io/v1beta1
+        kind: Machine
+        namespace: openshift-machine-api
+        label_selectors:
+          - machine.openshift.io/cluster-api-machine-role=worker
+      register: machines
+
+    - name: Identify machine for target node
+      ansible.builtin.set_fact:
+        target_machine: >-
+          {{ machines.resources
+             | selectattr('status.nodeRef.name', 'defined')
+             | selectattr('status.nodeRef.name', 'equalto', 'TARGET_NODE_NAME')
+             | map(attribute='metadata.name')
+             | first | default('') }}
+
+Step 4 — Delete the Machine to trigger a MachineSet replacement:
+    - name: Delete the Machine object
+      kubernetes.core.k8s:
+        api_version: machine.openshift.io/v1beta1
+        kind: Machine
+        namespace: openshift-machine-api
+        name: "{{ target_machine }}"
+        state: absent
+      when: target_machine | length > 0
+
+Step 5 — Wait for recovery (new node Ready):
+    - name: Wait for replacement worker to become Ready
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Node
+        label_selectors:
+          - node-role.kubernetes.io/worker
+      register: worker_nodes
+      until: >-
+        (worker_nodes.resources
+         | selectattr('status.conditions', 'defined')
+         | list | length) >= EXPECTED_WORKER_COUNT
+      retries: 30
+      delay: 30
+
+# OpenShift MachineSet and Machine API
+
+OpenShift uses the Machine API to manage worker node lifecycle:
+- MachineSet (machine.openshift.io/v1beta1): defines desired replica count and machine template
+- Machine (machine.openshift.io/v1beta1): represents a single machine instance
+- All resources are in openshift-machine-api namespace
+
+When you delete a Machine, the MachineSet controller detects the discrepancy between
+desired and current replicas, then provisions a replacement VM/instance. The new Machine
+goes through phases: Provisioning -> Provisioned -> Running. Once Running, the
+corresponding Node object appears in the cluster and goes through: NotReady -> Ready.
+
+To find the Machine for a specific node, query all Machines and filter by
+status.nodeRef.name matching the target node name.

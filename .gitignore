@@ -1,0 +1,36 @@
+# Credentials and secrets
+setup/.servicenow-credentials.env
+*.env
+!ansible/execution-environment/*.txt
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Ansible
+*.retry
+*.bak
+
+# Container build artifacts
+context/
+
+# Cursor
+.cursor/
+agent-tools/
+private/
