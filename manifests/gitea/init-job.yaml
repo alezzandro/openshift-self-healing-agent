@@ -68,13 +68,3 @@ spec:
             limits:
               cpu: 250m
               memory: 256Mi
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: gitea-admin-credentials
-  namespace: gitea
-type: Opaque
-stringData:
-  username: gitea_admin
-  password: "REPLACE_ME"

@@ -1,15 +1,4 @@
 apiVersion: v1
-kind: Secret
-metadata:
-  name: git-mcp-credentials
-  namespace: self-healing-agent
-type: Opaque
-stringData:
-  GITEA_URL: "https://gitea-gitea.apps.CLUSTER_DOMAIN"
-  GITEA_USERNAME: "gitea_admin"
-  GITEA_PASSWORD: "REPLACE_ME"
----
-apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: git-mcp-repos

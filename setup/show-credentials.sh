@@ -133,6 +133,11 @@ else
 fi
 echo ""
 
+echo "--- Local Credential Files ---"
+echo "  Generated passwords:  setup/.generated-credentials.env"
+echo "  ServiceNow passwords: setup/.servicenow-credentials.env"
+echo "  (These files are gitignored and never committed.)"
+echo ""
 echo "--- Quick Commands ---"
 echo "  Refresh this info:  ./setup/show-credentials.sh"
 echo "  AAP password:       oc get secret aap-admin-password -n aap -o jsonpath='{.data.password}' | base64 -d"

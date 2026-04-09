@@ -4,6 +4,27 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/ensure-authenticated.sh"
 MANIFESTS_DIR="${SCRIPT_DIR}/../manifests/rhoai"
+CREDS_FILE="${SCRIPT_DIR}/.generated-credentials.env"
+
+# ── Credential helper: generate once, persist, reuse ─────────────────────────
+load_or_generate_pg_password() {
+  if [ -f "${CREDS_FILE}" ]; then
+    local existing
+    existing=$(grep '^LLAMASTACK_PG_PASSWORD=' "${CREDS_FILE}" 2>/dev/null | head -1 || true)
+    if [ -n "${existing}" ]; then
+      PG_PASS="${existing#*=}"
+      PG_PASS="${PG_PASS#\'}"; PG_PASS="${PG_PASS%\'}"
+      if [ -n "${PG_PASS}" ]; then
+        echo "  Reusing LlamaStack Postgres password from ${CREDS_FILE}"
+        return
+      fi
+    fi
+  fi
+  PG_PASS="$(openssl rand -base64 18 | tr -d '/+=' | head -c 24)"
+  echo "LLAMASTACK_PG_PASSWORD='${PG_PASS}'" >> "${CREDS_FILE}"
+  chmod 0600 "${CREDS_FILE}"
+  echo "  Generated new LlamaStack Postgres password → saved to ${CREDS_FILE}"
+}
 
 echo "=== Configuring Red Hat OpenShift AI ==="
 echo ""
@@ -66,15 +87,12 @@ done
 echo ""
 
 echo "10. Deploying PostgreSQL for LlamaStack metadata store..."
-PG_SECRET_EXISTS=$(oc get secret llamastack-postgres-secret -n rhoai-project -o name 2>/dev/null || echo "")
-if [ -z "${PG_SECRET_EXISTS}" ]; then
-  PG_PASS="$(openssl rand -base64 18 | tr -d '/+=' | head -c 24)"
-  oc create secret generic llamastack-postgres-secret -n rhoai-project \
-    --from-literal=password="${PG_PASS}" \
-    --from-literal=POSTGRES_PASSWORD="${PG_PASS}" \
-    --dry-run=client -o yaml | oc apply -f -
-  echo "  [OK] PostgreSQL secret created with generated password"
-fi
+load_or_generate_pg_password
+oc create secret generic llamastack-postgres-secret -n rhoai-project \
+  --from-literal=password="${PG_PASS}" \
+  --from-literal=POSTGRES_PASSWORD="${PG_PASS}" \
+  --dry-run=client -o yaml | oc apply -f -
+echo "  [OK] PostgreSQL secret applied"
 oc apply -f "${MANIFESTS_DIR}/llamastack-postgres.yaml"
 echo "  Waiting for PostgreSQL to be ready..."
 for i in $(seq 1 60); do
@@ -133,7 +151,11 @@ echo ""
 
 echo ""
 echo "14. Configuring OpenShift Lightspeed (RAG over OCP 4.21 documentation)..."
-  echo "  Creating OLSConfig CR pointing to the local Mistral Small 3.1 24B model..."
+echo "  Creating proxy-api-keys secret for OLS → vLLM connection..."
+oc create secret generic proxy-api-keys -n openshift-lightspeed \
+  --from-literal=apitoken="no-auth-needed-for-local-vllm" \
+  --dry-run=client -o yaml | oc apply -f -
+echo "  Creating OLSConfig CR pointing to the local Mistral Small 3.1 24B model..."
 OLS_MANIFESTS="${SCRIPT_DIR}/../manifests/operators"
 oc apply -f "${OLS_MANIFESTS}/lightspeed-olsconfig.yaml"
 echo ""

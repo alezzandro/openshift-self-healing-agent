@@ -4,6 +4,27 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/ensure-authenticated.sh"
 MANIFESTS_DIR="${SCRIPT_DIR}/../manifests/gitea"
+CREDS_FILE="${SCRIPT_DIR}/.generated-credentials.env"
+
+# ── Credential helper: generate once, persist, reuse ─────────────────────────
+load_or_generate_gitea_password() {
+  if [ -f "${CREDS_FILE}" ]; then
+    local existing
+    existing=$(grep '^GITEA_ADMIN_PASSWORD=' "${CREDS_FILE}" 2>/dev/null | head -1 || true)
+    if [ -n "${existing}" ]; then
+      GITEA_PASS="${existing#*=}"
+      GITEA_PASS="${GITEA_PASS#\'}"; GITEA_PASS="${GITEA_PASS%\'}"
+      if [ -n "${GITEA_PASS}" ]; then
+        echo "  Reusing Gitea admin password from ${CREDS_FILE}"
+        return
+      fi
+    fi
+  fi
+  GITEA_PASS="$(openssl rand -base64 18 | tr -d '/+=' | head -c 16)Aa1!"
+  echo "GITEA_ADMIN_PASSWORD='${GITEA_PASS}'" >> "${CREDS_FILE}"
+  chmod 0600 "${CREDS_FILE}"
+  echo "  Generated new Gitea admin password → saved to ${CREDS_FILE}"
+}
 
 echo "=== Deploying Gitea Git Server ==="
 echo ""
@@ -34,7 +55,7 @@ for i in $(seq 1 60); do
 done
 echo ""
 
-GITEA_PASS="$(openssl rand -base64 18 | tr -d '/+=' | head -c 16)Aa1!"
+load_or_generate_gitea_password
 
 echo "3. Creating admin user..."
 oc exec -n gitea gitea-0 -c gitea -- gitea admin user create \

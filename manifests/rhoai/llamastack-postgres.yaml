@@ -1,14 +1,4 @@
 apiVersion: v1
-kind: Secret
-metadata:
-  name: llamastack-postgres-secret
-  namespace: rhoai-project
-type: Opaque
-stringData:
-  password: REPLACE_ME
-  POSTGRES_PASSWORD: REPLACE_ME
----
-apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: llamastack-postgres-pvc

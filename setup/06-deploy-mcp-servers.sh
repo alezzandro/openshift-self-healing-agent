@@ -83,12 +83,7 @@ for MCP_NAME in servicenow-mcp git-mcp; do
 done
 echo ""
 
-echo "3. Deploying MCP server manifests..."
-oc apply -f "${MANIFESTS_DIR}/servicenow-mcp.yaml"
-oc apply -f "${MANIFESTS_DIR}/git-mcp.yaml"
-echo ""
-
-echo "4. Updating secrets with actual credentials..."
+echo "3. Creating secrets for MCP servers..."
 if [ -n "${SNOW_INSTANCE:-}" ]; then
   oc create secret generic servicenow-mcp-credentials \
     -n self-healing-agent \
@@ -97,6 +92,9 @@ if [ -n "${SNOW_INSTANCE:-}" ]; then
     --from-literal=SERVICENOW_USERNAME="${SNOW_ADMIN_USERNAME:-admin}" \
     --from-literal=SERVICENOW_PASSWORD="${SNOW_ADMIN_PASSWORD}" \
     --dry-run=client -o yaml | oc apply -f -
+  echo "  [OK] ServiceNow MCP credentials secret applied"
+else
+  echo "  [WARN] SNOW_INSTANCE not set — ServiceNow MCP secret not created"
 fi
 
 GITEA_ROUTE=$(oc get route gitea -n gitea -o jsonpath='{.spec.host}' 2>/dev/null)
@@ -115,8 +113,14 @@ oc create secret generic git-mcp-credentials \
   --from-literal=GITEA_USERNAME="gitea_admin" \
   --from-literal=GITEA_PASSWORD="${GITEA_PASS}" \
   --dry-run=client -o yaml | oc apply -f -
+echo "  [OK] Git MCP credentials secret applied"
+echo ""
 
-echo "  Restarting deployments to pick up new secrets..."
+echo "4. Deploying MCP server manifests..."
+oc apply -f "${MANIFESTS_DIR}/servicenow-mcp.yaml"
+oc apply -f "${MANIFESTS_DIR}/git-mcp.yaml"
+
+echo "  Restarting deployments to pick up secrets..."
 oc rollout restart deployment/servicenow-mcp -n self-healing-agent 2>/dev/null || true
 oc rollout restart deployment/git-mcp -n self-healing-agent 2>/dev/null || true
 echo ""
