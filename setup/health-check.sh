@@ -293,15 +293,15 @@ if [ -f "${SNOW_CREDS}" ]; then
     if [ "${HTTP_CODE}" = "200" ]; then
       pass "ServiceNow instance reachable and authenticated (${SNOW_URL})"
     elif [ "${HTTP_CODE}" = "401" ] || [ "${HTTP_CODE}" = "403" ]; then
-      warn "ServiceNow reachable but auth failed (HTTP ${HTTP_CODE}) -- password may have changed"
+      fail "ServiceNow reachable but auth failed (HTTP ${HTTP_CODE}) -- check credentials in ${SNOW_CREDS}"
     elif [ "${HTTP_CODE}" = "000" ]; then
-      warn "ServiceNow unreachable -- dev instance may be hibernating (wake it at ${SNOW_URL})"
+      fail "ServiceNow unreachable (HTTP 000) -- dev instance is likely hibernating. Wake it at ${SNOW_URL} and re-run this check"
     else
-      warn "ServiceNow returned HTTP ${HTTP_CODE}"
+      fail "ServiceNow returned HTTP ${HTTP_CODE} -- instance may be starting up. Visit ${SNOW_URL} to verify"
     fi
   fi
 else
-  warn "ServiceNow credentials file not found (${SNOW_CREDS})"
+  fail "ServiceNow credentials file not found (${SNOW_CREDS}) -- run the ServiceNow setup step first"
 fi
 
 # ─────────────────────────────────────────────

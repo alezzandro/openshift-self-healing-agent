@@ -65,8 +65,31 @@ oc apply -f "${MANIFESTS_DIR}/hardware-profile.yaml"
 echo "  [OK] HardwareProfile gpu-l4-nvidia created"
 echo ""
 
-echo "7. Creating vLLM ServingRuntime (Red Hat AI Inference Server)..."
-oc apply -f "${MANIFESTS_DIR}/vllm-serving-runtime.yaml"
+echo "7. Creating vLLM NVIDIA GPU ServingRuntime for KServe..."
+VLLM_TEMPLATE_NAME=$(oc get template -n redhat-ods-applications -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+  | grep -i 'vllm.*cuda' | head -1 || true)
+if [ -n "${VLLM_TEMPLATE_NAME}" ]; then
+  echo "  Detected platform template: ${VLLM_TEMPLATE_NAME}"
+  TEMPLATE_DISPLAY=$(oc get template "${VLLM_TEMPLATE_NAME}" -n redhat-ods-applications \
+    -o jsonpath='{.objects[0].metadata.annotations.openshift\.io/display-name}' 2>/dev/null || echo "")
+  if [ -z "${TEMPLATE_DISPLAY}" ]; then
+    TEMPLATE_DISPLAY="vLLM NVIDIA GPU ServingRuntime for KServe"
+  fi
+  TMP_SR=$(mktemp)
+  sed \
+    -e "s|opendatahub.io/template-name:.*|opendatahub.io/template-name: ${VLLM_TEMPLATE_NAME}|" \
+    -e "s|opendatahub.io/template-display-name:.*|opendatahub.io/template-display-name: ${TEMPLATE_DISPLAY}|" \
+    "${MANIFESTS_DIR}/vllm-serving-runtime.yaml" > "${TMP_SR}"
+  oc apply -f "${TMP_SR}"
+  rm -f "${TMP_SR}"
+else
+  echo "  No platform vLLM CUDA template found — using manifest defaults"
+  oc apply -f "${MANIFESTS_DIR}/vllm-serving-runtime.yaml"
+fi
+if oc get servingruntime vllm-runtime -n rhoai-project &>/dev/null; then
+  echo "  Removing legacy 'vllm-runtime' (replaced by 'vllm-cuda-runtime')..."
+  oc delete servingruntime vllm-runtime -n rhoai-project 2>/dev/null || true
+fi
 echo ""
 
 echo "8. Creating InferenceService for Mistral Small 3.1 24B INT4 (OCI ModelCar from Red Hat Model Catalog)..."

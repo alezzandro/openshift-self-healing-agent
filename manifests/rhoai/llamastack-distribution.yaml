@@ -13,7 +13,7 @@ spec:
       port: 8321
       env:
         - name: VLLM_URL
-          value: "http://mistral-small-3-1-24b-predictor.rhoai-project.svc.cluster.local:8000/v1"
+          value: "http://mistral-small-3-1-24b-predictor.rhoai-project.svc.cluster.local:8080/v1"
         - name: INFERENCE_MODEL
           value: "mistral-small-3-1-24b"
         - name: VLLM_TLS_VERIFY

@@ -18,10 +18,9 @@
         alert_mcp_name: "{{ alert_mcp_name | default('') }}"
         diagnostics: "{{ diagnostics | default({}) }}"
         snow_incident_number: "{{ snow_incident_number | default('') }}"
-        snow_instance_url: "{{ snow_instance_url | default('') }}"
-        snow_admin_username: "{{ snow_admin_username | default('admin') }}"
-        snow_admin_password: "{{ snow_admin_password | default('') }}"
-        snow_ai_user_sysid: "{{ snow_ai_user_sysid | default('') }}"
+        snow_host: "{{ snow_instance_url | default('') }}"
+        snow_user: "{{ snow_ai_username | default('svc-ai-agent') }}"
+        snow_pass: "{{ snow_ai_password | default('') }}"
         gitea_host: "{{ gitea_host | default('') }}"
         gitea_password: "{{ gitea_password | default('') }}"
         aap_controller_host: "{{ aap_controller_host | default('') }}"
@@ -354,50 +353,17 @@
           === Playbook Generated ===
           {{ 'Yes (' ~ (ai_playbook | length) ~ ' chars)' if ai_playbook | length > 0 else 'No playbook section found' }}
 
-    # ── Step 2: Impersonate svc-ai-agent and update ServiceNow with RCA ──
-
-    - name: Start impersonation session as svc-ai-agent
-      ansible.builtin.uri:
-        url: "{{ snow_instance_url }}/api/now/ui/impersonate/{{ snow_ai_user_sysid }}"
-        method: POST
-        user: "{{ snow_admin_username }}"
-        password: "{{ snow_admin_password }}"
-        force_basic_auth: true
-        headers:
-          Content-Type: application/json
-          Accept: application/json
-        status_code: [200, 201]
-      register: ai_impersonate_result
-      when:
-        - snow_instance_url | length > 0
-        - snow_ai_user_sysid | length > 0
-
-    - name: Extract AI agent session cookie
-      ansible.builtin.set_fact:
-        snow_ai_cookie: "{{ ai_impersonate_result.cookies_string | default('') }}"
-      when: ai_impersonate_result is not skipped
-
-    - name: Look up ServiceNow incident for RCA update
-      ansible.builtin.uri:
-        url: "{{ snow_instance_url }}/api/now/table/incident?sysparm_query=number={{ snow_incident_number }}"
-        method: GET
-        headers:
-          Accept: application/json
-          Cookie: "{{ snow_ai_cookie | default('') }}"
-        status_code: 200
-      register: snow_incident_lookup
-      when: snow_incident_number | length > 0
+    # ── Step 2: Update ServiceNow with RCA (as svc-ai-agent via servicenow.itsm) ──
 
     - name: Update incident with AI Root Cause Analysis
-      ansible.builtin.uri:
-        url: "{{ snow_instance_url }}/api/now/table/incident/{{ snow_incident_lookup.json.result[0].sys_id }}"
-        method: PATCH
-        headers:
-          Content-Type: application/json
-          Accept: application/json
-          Cookie: "{{ snow_ai_cookie | default('') }}"
-        body_format: json
-        body:
+      servicenow.itsm.incident:
+        instance:
+          host: "{{ snow_host }}"
+          username: "{{ snow_user }}"
+          password: "{{ snow_pass }}"
+        state: in_progress
+        number: "{{ snow_incident_number }}"
+        other:
           work_notes: |
             [AI Root Cause Analysis]
             The AI agent (Mistral Small 3.1 24B via LlamaStack) analyzed the alert using:
@@ -405,30 +371,27 @@
             - OpenShift Lightspeed (OCP 4.21 product documentation)
 
             {{ ai_rca }}
-        status_code: [200]
       when:
         - snow_incident_number | length > 0
-        - snow_incident_lookup.json.result | length > 0
+        - snow_host | length > 0
         - ai_rca | trim | length > 0
 
     - name: Post fallback note when AI produced no usable RCA
-      ansible.builtin.uri:
-        url: "{{ snow_instance_url }}/api/now/table/incident/{{ snow_incident_lookup.json.result[0].sys_id }}"
-        method: PATCH
-        headers:
-          Content-Type: application/json
-          Accept: application/json
-          Cookie: "{{ snow_ai_cookie | default('') }}"
-        body_format: json
-        body:
+      servicenow.itsm.incident:
+        instance:
+          host: "{{ snow_host }}"
+          username: "{{ snow_user }}"
+          password: "{{ snow_pass }}"
+        state: in_progress
+        number: "{{ snow_incident_number }}"
+        other:
           work_notes: >-
             [AI Root Cause Analysis]
             The AI agent was invoked but did not produce a usable root cause analysis.
             Manual investigation is recommended.
-        status_code: [200]
       when:
         - snow_incident_number | length > 0
-        - snow_incident_lookup.json.result | length > 0
+        - snow_host | length > 0
         - ai_rca | trim | length == 0
 
     # ── Step 3: Clean up and push playbook to Git ──
@@ -463,180 +426,58 @@
 
     # ── Step 4: Sync AAP project and create Job Template ──
 
-    - name: Sync AAP project to pick up new playbook
-      ansible.builtin.uri:
-        url: "{{ aap_controller_host }}/api/controller/v2/projects/?name=Self-Healing+Agent"
-        method: GET
-        user: "{{ aap_controller_username }}"
-        password: "{{ aap_controller_password }}"
-        force_basic_auth: true
-        validate_certs: false
-        headers:
-          Accept: application/json
-        status_code: 200
-      register: aap_project_lookup
-      when:
-        - ai_playbook | length > 0
-        - aap_controller_host | length > 0
-
-    - name: Trigger project sync
-      ansible.builtin.uri:
-        url: "{{ aap_controller_host }}/api/controller/v2/projects/{{ aap_project_lookup.json.results[0].id }}/update/"
-        method: POST
-        user: "{{ aap_controller_username }}"
-        password: "{{ aap_controller_password }}"
-        force_basic_auth: true
-        validate_certs: false
-        headers:
-          Content-Type: application/json
-          Accept: application/json
-        status_code: [200, 201, 202]
-      when:
-        - ai_playbook | length > 0
-        - aap_project_lookup.json.results | default([]) | length > 0
-
-    - name: Wait for project sync to complete
-      ansible.builtin.uri:
-        url: "{{ aap_controller_host }}/api/controller/v2/projects/{{ aap_project_lookup.json.results[0].id }}/"
-        method: GET
-        user: "{{ aap_controller_username }}"
-        password: "{{ aap_controller_password }}"
-        force_basic_auth: true
-        validate_certs: false
-        headers:
-          Accept: application/json
-        status_code: 200
-      register: project_status
-      until: project_status.json.status | default('') in ['successful', 'failed', 'error']
-      retries: 30
-      delay: 5
-      when:
-        - ai_playbook | length > 0
-        - aap_project_lookup.json.results | default([]) | length > 0
-
-    - name: Look up Execution Environment ID
-      ansible.builtin.uri:
-        url: "{{ aap_controller_host }}/api/controller/v2/execution_environments/?name=Self-Healing+Agent+EE"
-        method: GET
-        user: "{{ aap_controller_username }}"
-        password: "{{ aap_controller_password }}"
-        force_basic_auth: true
-        validate_certs: false
-        headers:
-          Accept: application/json
-        status_code: 200
-      register: ee_lookup
-      when:
-        - ai_playbook | length > 0
-        - aap_controller_host | length > 0
-
-    - name: Look up Inventory ID
-      ansible.builtin.uri:
-        url: "{{ aap_controller_host }}/api/controller/v2/inventories/?name=Self-Healing+Inventory"
-        method: GET
-        user: "{{ aap_controller_username }}"
-        password: "{{ aap_controller_password }}"
-        force_basic_auth: true
-        validate_certs: false
-        headers:
-          Accept: application/json
-        status_code: 200
-      register: inv_lookup
-      when:
-        - ai_playbook | length > 0
-        - aap_controller_host | length > 0
-
-    - name: Look up OpenShift Cluster credential ID
-      ansible.builtin.uri:
-        url: "{{ aap_controller_host }}/api/controller/v2/credentials/?name=OpenShift+Cluster"
-        method: GET
-        user: "{{ aap_controller_username }}"
-        password: "{{ aap_controller_password }}"
-        force_basic_auth: true
-        validate_certs: false
-        headers:
-          Accept: application/json
-        status_code: 200
-      register: cred_lookup
-      when:
-        - ai_playbook | length > 0
-        - aap_controller_host | length > 0
-
     - name: Set remediation template name
       ansible.builtin.set_fact:
         remediation_jt_name: >-
           Remediate {{ alert_name }}{{ ' - ' + alert_qualifier if alert_qualifier | trim | length > 0 else '' }}
 
-    - name: Serialize extra_vars for AAP Job Template
-      ansible.builtin.set_fact:
-        jt_extra_vars_yaml: "{{ ai_extra_vars | default({}) | to_nice_yaml }}"
+    - name: Sync AAP project to pick up new playbook
+      ansible.controller.project_update:
+        controller_host: "{{ aap_controller_host }}"
+        controller_username: "{{ aap_controller_username }}"
+        controller_password: "{{ aap_controller_password }}"
+        validate_certs: false
+        name: "Self-Healing Agent"
+        wait: true
+        timeout: 150
+      when:
+        - ai_playbook | length > 0
+        - aap_controller_host | length > 0
 
     - name: Create remediation Job Template in AAP
-      ansible.builtin.uri:
-        url: "{{ aap_controller_host }}/api/controller/v2/job_templates/"
-        method: POST
-        user: "{{ aap_controller_username }}"
-        password: "{{ aap_controller_password }}"
-        force_basic_auth: true
+      ansible.controller.job_template:
+        controller_host: "{{ aap_controller_host }}"
+        controller_username: "{{ aap_controller_username }}"
+        controller_password: "{{ aap_controller_password }}"
         validate_certs: false
-        headers:
-          Content-Type: application/json
-          Accept: application/json
-        body_format: json
-        body:
-          name: "{{ remediation_jt_name }}"
-          project: "{{ aap_project_lookup.json.results[0].id }}"
-          playbook: "playbooks/{{ playbook_filename }}"
-          inventory: "{{ inv_lookup.json.results[0].id }}"
-          execution_environment: "{{ ee_lookup.json.results[0].id | default(omit) }}"
-          ask_variables_on_launch: true
-          extra_vars: "{{ jt_extra_vars_yaml }}"
-        status_code: [200, 201]
+        name: "{{ remediation_jt_name }}"
+        organization: "Default"
+        project: "Self-Healing Agent"
+        playbook: "playbooks/{{ playbook_filename }}"
+        inventory: "Self-Healing Inventory"
+        execution_environment: "Self-Healing Agent EE"
+        credentials:
+          - "OpenShift Cluster"
+        ask_variables_on_launch: true
+        extra_vars: "{{ ai_extra_vars | default({}) }}"
+        state: present
       register: jt_create_result
       when:
         - ai_playbook | length > 0
-        - aap_project_lookup.json.results | default([]) | length > 0
-        - inv_lookup.json.results | default([]) | length > 0
+        - aap_controller_host | length > 0
       ignore_errors: true
 
-    - name: Build credential association payload
-      ansible.builtin.set_fact:
-        _cred_assoc_body:
-          id: "{{ cred_lookup.json.results[0].id }}"
-      when:
-        - cred_lookup.json.results | default([]) | length > 0
-
-    - name: Associate OpenShift credential with the new Job Template
-      ansible.builtin.uri:
-        url: "{{ aap_controller_host }}/api/controller/v2/job_templates/{{ jt_create_result.json.id }}/credentials/"
-        method: POST
-        user: "{{ aap_controller_username }}"
-        password: "{{ aap_controller_password }}"
-        force_basic_auth: true
-        validate_certs: false
-        headers:
-          Content-Type: application/json
-          Accept: application/json
-        body_format: json
-        body: "{{ _cred_assoc_body | combine({'id': _cred_assoc_body.id | int}) }}"
-        status_code: [200, 201, 204]
-      when:
-        - jt_create_result is not skipped
-        - jt_create_result is not failed
-        - _cred_assoc_body is defined
-
-    # ── Step 5: Update ServiceNow with remediation info (still as svc-ai-agent) ──
+    # ── Step 5: Update ServiceNow with remediation info (as svc-ai-agent via servicenow.itsm) ──
 
     - name: Update incident with remediation details
-      ansible.builtin.uri:
-        url: "{{ snow_instance_url }}/api/now/table/incident/{{ snow_incident_lookup.json.result[0].sys_id }}"
-        method: PATCH
-        headers:
-          Content-Type: application/json
-          Accept: application/json
-          Cookie: "{{ snow_ai_cookie | default('') }}"
-        body_format: json
-        body:
+      servicenow.itsm.incident:
+        instance:
+          host: "{{ snow_host }}"
+          username: "{{ snow_user }}"
+          password: "{{ snow_pass }}"
+        state: in_progress
+        number: "{{ snow_incident_number }}"
+        other:
           work_notes: |
             [AI Remediation Ready - Action Required]
             The AI agent has generated a remediation playbook and it is ready for
@@ -677,10 +518,9 @@
             {% endif %}
             5. Monitor the job output for success or failure
             6. Update this incident with the execution results
-        status_code: [200]
       when:
         - snow_incident_number | length > 0
-        - snow_incident_lookup.json.result | length > 0
+        - snow_host | length > 0
         - ai_playbook | length > 0
 
     - name: Set stats with AI response for downstream steps

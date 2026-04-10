@@ -17,7 +17,7 @@ spec:
     model:
       modelFormat:
         name: vLLM
-      runtime: vllm-runtime
+      runtime: vllm-cuda-runtime
       storageUri: oci://registry.redhat.io/rhelai1/modelcar-mistral-small-3-1-24b-instruct-2503-quantized-w4a16:1.5
     minReplicas: 1
     maxReplicas: 1

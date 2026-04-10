@@ -18,10 +18,9 @@
         alert_mcp_name: "{{ alert_mcp_name | default('') }}"
         diagnostics: "{{ diagnostics | default({}) }}"
         snow_incident_number: "{{ snow_incident_number | default('') }}"
-        snow_instance_url: "{{ snow_instance_url | default('') }}"
-        snow_admin_username: "{{ snow_admin_username | default('admin') }}"
-        snow_admin_password: "{{ snow_admin_password | default('') }}"
-        snow_ai_user_sysid: "{{ snow_ai_user_sysid | default('') }}"
+        snow_host: "{{ snow_instance_url | default('') }}"
+        snow_user: "{{ snow_ai_username | default('svc-ai-agent') }}"
+        snow_pass: "{{ snow_ai_password | default('') }}"
         knowledge_base_match: "{{ knowledge_base_match | default({}) }}"
         aap_controller_host: "{{ aap_controller_host | default('') }}"
         aap_controller_username: "{{ aap_controller_username | default('admin') }}"
@@ -119,120 +118,58 @@
           === Extra Vars for Launch ===
           {{ ai_extra_vars | default({}) }}
 
-    # ── Step 2: Look up and launch the existing Job Template ──
+    # ── Step 2: Launch the existing Job Template ──
 
-    - name: Look up the known Job Template by name
-      ansible.builtin.uri:
-        url: "{{ aap_controller_host }}/api/controller/v2/job_templates/?name={{ knowledge_base_match.job_template_name | default('') | urlencode }}"
-        method: GET
-        user: "{{ aap_controller_username }}"
-        password: "{{ aap_controller_password }}"
-        force_basic_auth: true
+    - name: Launch the known remediation Job Template
+      ansible.controller.job_launch:
+        controller_host: "{{ aap_controller_host }}"
+        controller_username: "{{ aap_controller_username }}"
+        controller_password: "{{ aap_controller_password }}"
         validate_certs: false
-        headers:
-          Accept: application/json
-        status_code: 200
-      register: jt_lookup
+        name: "{{ knowledge_base_match.job_template_name | default('') }}"
+        extra_vars: "{{ ai_extra_vars | default({}) }}"
+      register: jt_launch_result
       when:
         - aap_controller_host | length > 0
         - knowledge_base_match.job_template_name | default('') | length > 0
-
-    - name: Launch the existing Job Template with computed extra_vars
-      ansible.builtin.uri:
-        url: "{{ aap_controller_host }}/api/controller/v2/job_templates/{{ jt_lookup.json.results[0].id }}/launch/"
-        method: POST
-        user: "{{ aap_controller_username }}"
-        password: "{{ aap_controller_password }}"
-        force_basic_auth: true
-        validate_certs: false
-        headers:
-          Content-Type: application/json
-          Accept: application/json
-        body_format: json
-        body:
-          extra_vars: "{{ ai_extra_vars | default({}) | to_nice_yaml }}"
-        status_code: [200, 201, 202]
-      register: jt_launch_result
-      when:
-        - jt_lookup is not skipped
-        - jt_lookup.json.results | default([]) | length > 0
       ignore_errors: true
 
     - name: Wait for launched job to complete
-      ansible.builtin.uri:
-        url: "{{ aap_controller_host }}/api/controller/v2/jobs/{{ jt_launch_result.json.id }}/"
-        method: GET
-        user: "{{ aap_controller_username }}"
-        password: "{{ aap_controller_password }}"
-        force_basic_auth: true
+      ansible.controller.job_wait:
+        controller_host: "{{ aap_controller_host }}"
+        controller_username: "{{ aap_controller_username }}"
+        controller_password: "{{ aap_controller_password }}"
         validate_certs: false
-        headers:
-          Accept: application/json
-        status_code: 200
+        job_id: "{{ jt_launch_result.id }}"
+        timeout: 600
       register: job_status
-      until: job_status.json.status | default('') in ['successful', 'failed', 'error', 'canceled']
-      retries: 60
-      delay: 10
       when:
         - jt_launch_result is not skipped
         - jt_launch_result is not failed
 
-    # ── Step 3: Impersonate svc-ai-agent and update ServiceNow ──
-
-    - name: Start impersonation session as svc-ai-agent
-      ansible.builtin.uri:
-        url: "{{ snow_instance_url }}/api/now/ui/impersonate/{{ snow_ai_user_sysid }}"
-        method: POST
-        user: "{{ snow_admin_username }}"
-        password: "{{ snow_admin_password }}"
-        force_basic_auth: true
-        headers:
-          Content-Type: application/json
-          Accept: application/json
-        status_code: [200, 201]
-      register: ai_impersonate_result
-      when:
-        - snow_instance_url | length > 0
-        - snow_ai_user_sysid | length > 0
-
-    - name: Extract AI agent session cookie
-      ansible.builtin.set_fact:
-        snow_ai_cookie: "{{ ai_impersonate_result.cookies_string | default('') }}"
-      when: ai_impersonate_result is not skipped
-
-    - name: Look up ServiceNow incident
-      ansible.builtin.uri:
-        url: "{{ snow_instance_url }}/api/now/table/incident?sysparm_query=number={{ snow_incident_number }}"
-        method: GET
-        headers:
-          Accept: application/json
-          Cookie: "{{ snow_ai_cookie | default('') }}"
-        status_code: 200
-      register: snow_incident_lookup
-      when: snow_incident_number | length > 0
+    # ── Step 3: Update ServiceNow (as svc-ai-agent via servicenow.itsm) ──
 
     - name: Build job execution status summary
       ansible.builtin.set_fact:
         job_result_summary: >-
           {% if jt_launch_result is defined and jt_launch_result is not skipped and jt_launch_result is not failed %}
-          Job #{{ jt_launch_result.json.id | default('?') }} launched successfully.
+          Job #{{ jt_launch_result.id | default('?') }} launched successfully.
           {% if job_status is defined and job_status is not skipped %}
-          Final status: {{ job_status.json.status | default('unknown') }}.
+          Final status: {{ job_status.status | default('unknown') }}.
           {% endif %}
           {% else %}
           Job Template could not be launched automatically. Manual execution required.
           {% endif %}
 
     - name: Update incident noting known issue and auto-remediation
-      ansible.builtin.uri:
-        url: "{{ snow_instance_url }}/api/now/table/incident/{{ snow_incident_lookup.json.result[0].sys_id }}"
-        method: PATCH
-        headers:
-          Content-Type: application/json
-          Accept: application/json
-          Cookie: "{{ snow_ai_cookie | default('') }}"
-        body_format: json
-        body:
+      servicenow.itsm.incident:
+        instance:
+          host: "{{ snow_host }}"
+          username: "{{ snow_user }}"
+          password: "{{ snow_pass }}"
+        state: in_progress
+        number: "{{ snow_incident_number }}"
+        other:
           work_notes: |
             [AI Auto-Remediation - Known Issue Detected]
             The AI agent has identified this as a recurring issue with a known resolution.
@@ -255,10 +192,9 @@
             The remediation was applied automatically using the existing Job Template
             with AI-derived extra variables. Monitor the AAP Console at
             {{ aap_controller_host | default('AAP') }} for detailed execution logs.
-        status_code: [200]
       when:
         - snow_incident_number | length > 0
-        - snow_incident_lookup.json.result | length > 0
+        - snow_host | length > 0
 
     - name: Set stats with AI response
       ansible.builtin.set_stats:
@@ -266,6 +202,6 @@
           ai_response_text: "{{ ai_text }}"
           ai_response_status: "auto-remediated"
           ai_extra_vars: "{{ ai_extra_vars | default({}) }}"
-          auto_launch_job_id: "{{ jt_launch_result.json.id | default('') }}"
-          auto_launch_status: "{{ job_status.json.status | default('not_launched') }}"
+          auto_launch_job_id: "{{ jt_launch_result.id | default('') }}"
+          auto_launch_status: "{{ job_status.status | default('not_launched') }}"
         per_host: false

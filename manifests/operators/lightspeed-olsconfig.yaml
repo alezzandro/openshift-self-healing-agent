@@ -12,7 +12,7 @@ spec:
         parameters: {}
       name: LocalLLM
       type: rhelai_vllm
-      url: http://mistral-small-3-1-24b-predictor.rhoai-project.svc.cluster.local:8000/v1
+      url: http://mistral-small-3-1-24b-predictor.rhoai-project.svc.cluster.local:8080/v1
   ols:
     conversationCache:
       postgres:
