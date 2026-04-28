@@ -383,6 +383,7 @@ This cleans:
 - [Architecture](docs/architecture.md) -- Full component diagram and data flow
 - [ServiceNow Developer Instance](docs/servicenow-developer-instance.md) -- Setup guide
 - [Demo Walkthrough](docs/demo-walkthrough.md) -- Scripted demo with talking points
+- [Production Evolution Roadmap](docs/production-evolution-roadmap.md) -- Future architecture for autonomous, general-purpose self-healing
 
 ## Products Featured
 
