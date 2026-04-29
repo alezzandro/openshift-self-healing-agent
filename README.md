@@ -384,6 +384,7 @@ This cleans:
 - [ServiceNow Developer Instance](docs/servicenow-developer-instance.md) -- Setup guide
 - [Demo Walkthrough](docs/demo-walkthrough.md) -- Scripted demo with talking points
 - [Production Evolution Roadmap](docs/production-evolution-roadmap.md) -- Future architecture for autonomous, general-purpose self-healing
+- [AI Automation for Telco Self-Healing](docs/ai-automation-telco-self-healing.md) -- Industry research on deterministic AI in telco, with Red Hat product architecture mapping
 
 ## Products Featured
 
