@@ -389,6 +389,154 @@ promptly with the richest possible context.
 | EDA Kafka consumer | `ansible.eda.kafka` source plugin | Built into EDA Controller |
 | Incident registry | PostgreSQL (shared or dedicated) | `crunchy-postgres-operator` or AAP-managed |
 
+### Implementation Effort Analysis
+
+The filtering pipeline described above ranges from off-the-shelf operator
+installs to moderate custom development. This subsection breaks down each
+component so teams can estimate cost and staffing realistically.
+
+**Off-the-shelf (operator install + YAML configuration, no custom code)**
+
+| Component | What It Takes | Effort |
+|-----------|--------------|--------|
+| AMQ Streams broker + topics | Install `amqstreams` operator, define `Kafka` CR, create `KafkaTopic` CRs for `alerts-raw` and `alerts-filtered` | 1-2 days (including sizing, TLS, retention tuning) |
+| EDA rulebook switch to Kafka | Replace `ansible.eda.alertmanager` source with `ansible.eda.kafka` in the rulebook YAML (plugin ships with EDA Controller) | Hours |
+
+**Light custom development (small, well-scoped)**
+
+The **webhook-to-Kafka bridge** is needed because Alertmanager speaks HTTP
+webhooks while Kafka speaks its own protocol. Three options, all small:
+
+| Option | Size | Notes |
+|--------|------|-------|
+| Camel-K Integration CR | ~20 lines YAML | `from("platform-http:/endpoint").to("kafka:alerts-raw")` -- the Red Hat Build of Apache Camel operator handles the rest |
+| Go sidecar | ~100 lines | HTTP server + `confluent-kafka-go` producer, containerized with UBI9 |
+| Python sidecar | ~100 lines | Flask + `confluent-kafka` producer, containerized with UBI9 |
+
+Effort: **1-3 days** depending on language familiarity.
+
+**Moderate custom development (the core stream processor)**
+
+The stream processor implementing Stages 2-4 is where the real engineering
+work lives:
+
+| Stage | Logic | Complexity | Estimated Code |
+|-------|-------|------------|---------------|
+| Severity gate | Route/filter by `severity` label value | Trivial | ~50 lines |
+| Pending window (warnings) | Kafka Streams `SessionWindows` keyed by alert fingerprint; hold `firing`, cancel if `resolved` arrives before window closes | Medium | ~200-300 lines |
+| Dedup against incident registry | Query PostgreSQL (REST or JDBC) on every event to check for in-flight match | Medium | ~100-200 lines |
+| Correlation window | Kafka Streams `SessionWindows` keyed by correlation key (node, namespace); accumulate alerts, emit consolidated event on window close | High | ~300-400 lines |
+
+Total stream processor: **~800-1,200 lines of Java/Kotlin** (or equivalent
+Quarkus reactive code). Realistically **2-3 weeks** of development including
+tests, edge cases (e.g., a warning-level alert arrives first but a critical
+follows 10 seconds later and should upgrade the group severity), and
+integration testing against a real Kafka cluster.
+
+**Incident registry (PostgreSQL schema + API)**
+
+| Component | Description | Estimated Code |
+|-----------|-------------|---------------|
+| Database schema | ~5 tables: incidents, alerts, state_transitions, correlation_groups, cooldowns | ~100 lines SQL |
+| REST API or JDBC layer | CRUD operations for the stream processor and workflow steps | ~500-800 lines (FastAPI or Quarkus) |
+
+Effort: **1-2 weeks** including schema design, migration scripts, and the API.
+
+**Total effort for the full Kafka-based pipeline:**
+
+| Component | Custom Code | Effort |
+|-----------|------------|--------|
+| AMQ Streams operator + topics | None (YAML) | 1-2 days |
+| Webhook-to-Kafka bridge | ~20-100 lines | 1-3 days |
+| EDA rulebook switch to Kafka | None (YAML) | Hours |
+| Stream processor (all 4 stages) | ~800-1,200 lines | 2-3 weeks |
+| Incident registry (schema + API) | ~500-800 lines | 1-2 weeks |
+| Integration testing | Test suite | 1 week |
+| **Total** | **~1,500-2,200 lines** | **5-7 weeks** |
+
+### Alternative Approaches (Reduced Effort)
+
+If the full Kafka pipeline is too heavy for an initial production deployment,
+three lighter alternatives trade sophistication for speed. Each delivers
+progressively less filtering capability but at substantially lower cost.
+
+**Option A: EDA-native event filter (no Kafka)**
+
+Keep the current `ansible.eda.alertmanager` webhook source. Implement the
+severity gate and fingerprint-based dedup as a custom
+[EDA event filter plugin](https://docs.redhat.com/en/documentation/red_hat_ansible_automation_platform/2.5/html/using_event-driven_ansible_automation/eda-user-guide-custom-event-filter)
+-- a single Python file that runs inside the EDA Controller process.
+
+| Capability | Supported | Notes |
+|-----------|-----------|-------|
+| Severity gate (drop info, defer warnings) | Yes | Stateless filter logic |
+| Fingerprint dedup | Partial | In-memory dict with TTL; lost on EDA restart |
+| Correlation window | No | EDA filters are per-event; no native windowing |
+| Burst buffering / replay | No | Alertmanager webhook can still overload EDA |
+
+Effort: **~1-2 weeks.** Best for teams that want immediate noise reduction
+without new infrastructure.
+
+**Option B: Alertmanager-native grouping + inhibition (no custom code)**
+
+Push filtering logic entirely into Alertmanager's built-in features:
+
+- `inhibit_rules` to suppress `KubeNodePressure` when `KubeNodeNotReady` is
+  firing on the same node.
+- `group_by: [node]` to batch node-related alerts into a single webhook call.
+- `group_wait: 60s` to approximate the correlation window.
+- Route-level `matchers` to silence `info`-level alerts entirely.
+- `mute_time_intervals` for known maintenance windows.
+
+| Capability | Supported | Notes |
+|-----------|-----------|-------|
+| Severity gate | Yes | Route matchers filter by severity |
+| Grouping / correlation | Partial | `group_by` is coarser than Kafka session windows |
+| Inhibition (causal suppression) | Yes | Suppresses child alerts when parent is firing |
+| Dedup against incident registry | No | No external state awareness |
+| Burst buffering / replay | No | Webhook delivery is fire-and-forget |
+
+Effort: **~2-3 days** of Alertmanager configuration tuning. Zero custom code.
+Best for teams that need quick wins with no new components.
+
+**Option C: Hybrid -- Alertmanager config + EDA event filter (recommended first step)**
+
+Combine Options A and B: use Alertmanager for the heavy lifting (grouping,
+inhibition, severity routing) and a lightweight EDA event filter for incident
+registry dedup. Skip Kafka entirely for the initial deployment.
+
+| Capability | Handled By |
+|-----------|-----------|
+| Severity gate | Alertmanager route matchers |
+| Alert grouping | Alertmanager `group_by` + `group_wait` |
+| Causal inhibition | Alertmanager `inhibit_rules` |
+| In-flight incident dedup | EDA event filter (Python, queries PostgreSQL) |
+| Burst buffering / replay | Not available (add Kafka later if needed) |
+
+Effort: **~1-2 weeks total.** This approach delivers an estimated 80% of the
+noise reduction at ~20% of the full Kafka pipeline cost. It is the
+**recommended starting point** for a first production deployment. Kafka can
+be introduced later when alert volume, reliability SLAs, or multi-source
+ingestion requirements justify the additional infrastructure.
+
+### Recommended Adoption Path
+
+```
+Phase 1 (weeks 1-2)          Phase 2 (weeks 3-8)          Phase 3 (future)
+─────────────────────         ─────────────────────         ─────────────────
+Alertmanager config           + EDA event filter            + AMQ Streams
+  - inhibit_rules               - Severity gate               - Kafka topics
+  - group_by node               - Incident registry           - Stream processor
+  - silence info alerts          dedup (PostgreSQL)            - Correlation windows
+  - group_wait 60s              - Cooldown logic              - Replay / exactly-once
+                                                              - Multi-source ingestion
+                                                                (Loki, RHACS, audit)
+
+Noise reduction: ~50%        Noise reduction: ~80%         Noise reduction: ~90%+
+Custom code: 0 lines         Custom code: ~500 lines       Custom code: ~2,000 lines
+New infra: none              New infra: PostgreSQL table    New infra: AMQ Streams
+```
+
 ---
 
 ## 4. Alert Deduplication, Correlation, and Suppression
