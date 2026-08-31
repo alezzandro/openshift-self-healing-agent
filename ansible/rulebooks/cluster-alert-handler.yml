@@ -150,3 +150,27 @@
               alert_pod: "{{ event.alert.labels.pod | default('') }}"
               alert_description: "{{ event.alert.annotations.description | default('MachineConfigPool is degraded') }}"
               alert_summary: "{{ event.alert.annotations.summary | default('') }}"
+
+    - name: Handle DemoCNFImagePullBackOff alert
+      condition: >-
+        event.alert.status == "firing"
+        and event.alert.labels.alertname == "DemoCNFImagePullBackOff"
+      throttle:
+        once_within: 3 hours
+        group_by_attributes:
+          - event.alert.labels.alertname
+          - event.alert.labels.namespace
+          - event.alert.labels.pod
+      action:
+        run_workflow_template:
+          name: self-healing-workflow
+          organization: Default
+          job_args:
+            extra_vars:
+              alert_name: "{{ event.alert.labels.alertname }}"
+              alert_severity: "{{ event.alert.labels.severity | default('warning') }}"
+              alert_namespace: "{{ event.alert.labels.namespace | default('cnf-gitops-demo') }}"
+              alert_pod: "{{ event.alert.labels.pod | default('') }}"
+              alert_node: "{{ event.alert.labels.node | default('') }}"
+              alert_description: "{{ event.alert.annotations.description | default('CNF ImagePullBackOff after GitOps sync') }}"
+              alert_summary: "{{ event.alert.annotations.summary | default('') }}"

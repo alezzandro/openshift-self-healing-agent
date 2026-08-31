@@ -71,3 +71,22 @@ spec:
           for: 1m
           labels:
             severity: warning
+
+    - name: self-healing-demo.gitops.rules
+      rules:
+        - alert: DemoCNFImagePullBackOff
+          annotations:
+            description: >-
+              Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has
+              container {{ $labels.container }} stuck in ImagePullBackOff for
+              more than 1 minute (CNF GitOps demo).
+            summary: CNF sample image pull failing after GitOps sync.
+          expr: |
+            kube_pod_container_status_waiting_reason{
+              reason="ImagePullBackOff",
+              namespace="cnf-gitops-demo"
+            } == 1
+          for: 1m
+          labels:
+            severity: warning
+            demo_track: gitops
