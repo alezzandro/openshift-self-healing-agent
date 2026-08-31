@@ -405,7 +405,7 @@
         ai_extra_vars: >-
           {{ (ai_extra_vars | default({})) | combine({
             'good_image': 'registry.access.redhat.com/ubi9/httpd-24:latest',
-            'target_namespace': alert_namespace | default('cnf-gitops-demo'),
+            'target_namespace': (diagnostics.alert_namespace | default(alert_namespace | default(''))) | default('cnf-gitops-demo', true),
             'repo_owner': 'gitea_admin',
             'repo_name': 'cnf-sample',
             'file_path': 'deployment.yaml',
