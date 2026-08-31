@@ -97,9 +97,32 @@ oc delete namespace self-healing-agent --timeout=120s 2>/dev/null \
 echo ""
 
 ###############################################################################
-# 4. Remove Gitea (delete entire namespace)
+# 4. Remove GitOps demo resources (keep OpenShift GitOps operator)
 ###############################################################################
-echo "4. Removing Gitea namespace..."
+echo "4. Removing GitOps demo resources..."
+echo "  Note: OpenShift GitOps operator and openshift-gitops namespace are"
+echo "        preserved (shared cluster component; removing the operator is"
+echo "        destructive and affects other Argo CD workloads)."
+
+GITOPS_NS="openshift-gitops"
+
+oc delete application cnf-sample -n "${GITOPS_NS}" --timeout=60s 2>/dev/null \
+  && ok "Deleted Argo CD Application cnf-sample" \
+  || skip "Application cnf-sample not found in ${GITOPS_NS}"
+
+oc delete secret gitea-cnf-sample -n "${GITOPS_NS}" 2>/dev/null \
+  && ok "Deleted Argo CD repository secret gitea-cnf-sample" \
+  || skip "Repository secret gitea-cnf-sample not found"
+
+oc delete namespace cnf-gitops-demo --timeout=120s 2>/dev/null \
+  && ok "Deleted namespace cnf-gitops-demo" \
+  || skip "Namespace cnf-gitops-demo not found"
+echo ""
+
+###############################################################################
+# 5. Remove Gitea (delete entire namespace; includes cnf-sample repo)
+###############################################################################
+echo "5. Removing Gitea namespace..."
 
 oc delete namespace gitea --timeout=120s 2>/dev/null \
   && ok "Deleted namespace gitea" \
@@ -107,9 +130,9 @@ oc delete namespace gitea --timeout=120s 2>/dev/null \
 echo ""
 
 ###############################################################################
-# 5. Remove RHOAI project workloads (delete entire namespace)
+# 6. Remove RHOAI project workloads (delete entire namespace)
 ###############################################################################
-echo "5. Removing RHOAI project namespace (model serving, LlamaStack, Postgres)..."
+echo "6. Removing RHOAI project namespace (model serving, LlamaStack, Postgres)..."
 
 oc delete inferenceservice --all -n rhoai-project --timeout=60s 2>/dev/null || true
 oc delete llamastackdistribution --all -n rhoai-project --timeout=60s 2>/dev/null || true
@@ -120,9 +143,9 @@ oc delete namespace rhoai-project --timeout=180s 2>/dev/null \
 echo ""
 
 ###############################################################################
-# 6. Remove RHOAI cluster-level configuration (keep operator)
+# 7. Remove RHOAI cluster-level configuration (keep operator)
 ###############################################################################
-echo "6. Removing RHOAI cluster-level configuration..."
+echo "7. Removing RHOAI cluster-level configuration..."
 
 oc delete datasciencecluster default-dsc --timeout=60s 2>/dev/null \
   && ok "Deleted DataScienceCluster default-dsc" \
@@ -144,9 +167,9 @@ oc patch odhdashboardconfig odh-dashboard-config -n redhat-ods-applications \
 echo ""
 
 ###############################################################################
-# 7. Remove Lightspeed configuration (keep operator)
+# 8. Remove Lightspeed configuration (keep operator)
 ###############################################################################
-echo "7. Removing Lightspeed configuration..."
+echo "8. Removing Lightspeed configuration..."
 
 oc delete olsconfig cluster --timeout=60s 2>/dev/null \
   && ok "Deleted OLSConfig cluster" \
@@ -174,9 +197,9 @@ oc delete clusterrolebinding self-healing-ols-query-access 2>/dev/null \
 echo ""
 
 ###############################################################################
-# 8. Revert image registry default route (optional, safe)
+# 9. Revert image registry default route (optional, safe)
 ###############################################################################
-echo "8. Reverting image registry default route..."
+echo "9. Reverting image registry default route..."
 
 oc patch configs.imageregistry.operator.openshift.io/cluster --type merge \
   -p '{"spec":{"defaultRoute":false}}' 2>/dev/null \
@@ -185,9 +208,9 @@ oc patch configs.imageregistry.operator.openshift.io/cluster --type merge \
 echo ""
 
 ###############################################################################
-# 9. Clean up local credential files
+# 10. Clean up local credential files
 ###############################################################################
-echo "9. Removing local credential files..."
+echo "10. Removing local credential files..."
 
 for CRED_FILE in \
   "${SCRIPT_DIR}/.generated-credentials.env" \
@@ -202,9 +225,9 @@ done
 echo ""
 
 ###############################################################################
-# 10. Clean up local container images (optional)
+# 11. Clean up local container images (optional)
 ###############################################################################
-echo "10. Cleaning up local container images..."
+echo "11. Cleaning up local container images..."
 
 for IMG in $(podman images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -E 'self-healing-ee|servicenow-mcp|git-mcp' || true); do
   podman rmi "${IMG}" 2>/dev/null && ok "Removed image ${IMG}" || true
@@ -220,8 +243,9 @@ echo "  Uninstall complete"
 echo "============================================================"
 echo ""
 echo "Removed:"
+echo "  - GitOps demo Application cnf-sample and namespace cnf-gitops-demo"
 echo "  - AAP instance and configuration (operator preserved)"
-echo "  - Gitea namespace and all resources"
+echo "  - Gitea namespace and all resources (including cnf-sample repo)"
 echo "  - MCP servers namespace and all resources"
 echo "  - RHOAI project (model, LlamaStack, Postgres)"
 echo "  - DataScienceCluster, HardwareProfile, Gen AI Playground config"
@@ -231,7 +255,8 @@ echo "  - Node protection labels"
 echo "  - Local credential files"
 echo ""
 echo "Preserved:"
-echo "  - All operator subscriptions (AAP, RHOAI, GPU, NFD, Lightspeed)"
+echo "  - OpenShift GitOps operator and openshift-gitops namespace"
+echo "  - All operator subscriptions (AAP, RHOAI, GPU, NFD, Lightspeed, GitOps)"
 echo "  - Operator namespaces (aap, redhat-ods-operator, nvidia-gpu-operator, etc.)"
 echo "  - GPU and general worker nodes"
 echo "  - Cluster configuration (OAuth, MachineConfig, etc.)"
