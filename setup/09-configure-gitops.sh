@@ -264,6 +264,21 @@ sed "s|https://REPLACE_GITEA_HOST/gitea_admin/cnf-sample.git|${INCLUSTER_REPO}|"
 echo "  [OK] Application applied with repoURL ${INCLUSTER_REPO}"
 echo ""
 
+echo "7b. Granting Argo CD application-controller admin on cnf-gitops-demo..."
+# CreateNamespace=true creates the ns, but the default OpenShift GitOps controller
+# ClusterRole does not allow managing Deployments there until explicitly granted.
+oc create namespace cnf-gitops-demo --dry-run=client -o yaml | oc apply -f - >/dev/null
+oc create rolebinding gitops-app-controller-admin \
+  --clusterrole=admin \
+  --serviceaccount="${GITOPS_NS}:openshift-gitops-argocd-application-controller" \
+  -n cnf-gitops-demo 2>/dev/null \
+  || oc get rolebinding gitops-app-controller-admin -n cnf-gitops-demo >/dev/null
+echo "  [OK] RoleBinding gitops-app-controller-admin in cnf-gitops-demo"
+# Kick a sync if a prior attempt failed before RBAC existed
+oc -n "${GITOPS_NS}" annotate application cnf-sample \
+  argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
+echo ""
+
 echo "8. Waiting for Application cnf-sample to become Synced/Healthy..."
 APP_OK=0
 for i in $(seq 1 60); do

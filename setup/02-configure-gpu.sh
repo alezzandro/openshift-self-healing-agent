@@ -14,8 +14,14 @@ echo ""
 
 echo "2. Waiting for NFD worker pods..."
 for i in $(seq 1 60); do
-  NFD_READY=$(oc get pods -n openshift-nfd -l app.kubernetes.io/component=worker \
+  # OCP 4.22 NFD workers use label app=nfd-worker (older builds used
+  # app.kubernetes.io/component=worker).
+  NFD_READY=$(oc get pods -n openshift-nfd -l 'app in (nfd-worker),app.kubernetes.io/component=worker' \
     --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
+  if [ "${NFD_READY}" -eq 0 ]; then
+    NFD_READY=$(oc get pods -n openshift-nfd -l app=nfd-worker \
+      --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
+  fi
   if [ "${NFD_READY}" -gt 0 ]; then
     echo "  [OK] NFD worker pods running: ${NFD_READY}"
     break
