@@ -130,16 +130,16 @@ for i in $(seq 1 60); do
 done
 echo ""
 
-echo "11. Deploying LlamaStack distribution (rh-dev)..."
-oc apply -f "${MANIFESTS_DIR}/llamastack-distribution.yaml"
+echo "11. Deploying OGX server (RHOAI 3.5+; formerly Llama Stack)..."
+oc apply -f "${MANIFESTS_DIR}/ogx-server.yaml"
 echo ""
 
-echo "12. Waiting for LlamaStack to be ready..."
+echo "12. Waiting for OGXServer to be ready..."
 for i in $(seq 1 60); do
-  LS_PHASE=$(oc get llamastackdistribution self-healing-agent -n rhoai-project \
+  LS_PHASE=$(oc get ogxserver self-healing-agent -n rhoai-project \
     -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
   if [ "${LS_PHASE}" = "Ready" ]; then
-    echo "  [OK] LlamaStack is Ready"
+    echo "  [OK] OGXServer is Ready"
     break
   fi
   echo "  Attempt ${i}/60 -- phase: ${LS_PHASE:-Pending}"
@@ -147,7 +147,7 @@ for i in $(seq 1 60); do
 done
 
 echo ""
-echo "13. Creating NetworkPolicy to allow AAP namespace access to LlamaStack..."
+echo "13. Creating NetworkPolicy to allow AAP namespace access to OGX..."
 cat <<'NETPOL_EOF' | oc apply -f -
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -157,7 +157,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app: llama-stack
+      app: ogx
       app.kubernetes.io/instance: self-healing-agent
   ingress:
   - from:
@@ -171,7 +171,7 @@ spec:
   - Ingress
 NETPOL_EOF
 
-echo "  Creating NetworkPolicy to allow MCP servers (self-healing-agent ns) access to LlamaStack..."
+echo "  Creating NetworkPolicy to allow MCP servers (self-healing-agent ns) access to OGX..."
 cat <<'NETPOL2_EOF' | oc apply -f -
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -181,7 +181,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app: llama-stack
+      app: ogx
       app.kubernetes.io/instance: self-healing-agent
   ingress:
   - from:
