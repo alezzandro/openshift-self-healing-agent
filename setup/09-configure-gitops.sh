@@ -206,18 +206,24 @@ fi
 cp "${GITOPS_APP_MANIFESTS}/"*.yaml "${REPO_TMP}/"
 (
   cd "${REPO_TMP}"
+  if git show-ref --verify --quiet refs/remotes/origin/main; then
+    git checkout -B main origin/main >/dev/null 2>&1
+  else
+    # Normalize whatever branch was cloned so repeated runs always seed main.
+    git checkout -B main >/dev/null 2>&1
+  fi
   git add -A
   if git diff --cached --quiet; then
     echo "  [OK] cnf-sample manifests already up to date"
   else
     git -c user.email="demo@redhat.com" -c user.name="Demo Setup" \
       commit -m "Seed cnf-sample with known-good UBI httpd Deployment" >/dev/null
-    if GIT_SSL_NO_VERIFY=true git push origin main >/dev/null 2>&1; then
-      echo "  [OK] Manifests pushed to Gitea (branch main)"
-    else
-      echo "  [FAIL] git push to origin main failed"
-      exit 1
-    fi
+  fi
+  if GIT_SSL_NO_VERIFY=true git push -u origin main >/dev/null 2>&1; then
+    echo "  [OK] Manifests available in Gitea (branch main)"
+  else
+    echo "  [FAIL] git push -u origin main failed"
+    exit 1
   fi
 )
 rm -rf "${REPO_TMP}"
