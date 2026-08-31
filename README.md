@@ -191,7 +191,7 @@ the analysis layer and governance in the execution layer.
 
 ## Demo Scenarios
 
-All scenarios target **cluster infrastructure**, not user workloads:
+**Infrastructure track** (`demo/infrastructure/`) targets cluster infrastructure:
 
 | # | Scenario | Layer | Alert |
 |---|----------|-------|-------|
@@ -200,13 +200,14 @@ All scenarios target **cluster infrastructure**, not user workloads:
 | 3 | Node Disk Pressure | Node Resources | `NodeFilesystemSpaceFillingUp` |
 | 4 | MachineConfigPool Degraded | Node Configuration | `MCPDegraded` |
 
+**GitOps track** (`demo/gitops/`): ImagePullBackOff from a bad CNF image tag (`DemoCNFImagePullBackOff`). Presenter script: `demo/gitops/README.md`.
+
 Each scenario has its own `README.md` with a full presenter script and talking points.
-See `demo/infrastructure/scenarios/<scenario>/README.md`.
 
 ## Demo Tracks
 
 - `demo/infrastructure/` contains the Day-2 infrastructure self-healing scenarios for node, operator, disk, and MCP incidents.
-- `demo/gitops/` is reserved for the GitOps CNF delivery track built around Red Hat OpenShift GitOps.
+- `demo/gitops/` contains the GitOps CNF delivery scenario (`01-imagepullbackoff-bad-tag`, alert `DemoCNFImagePullBackOff`). See `demo/gitops/README.md`.
 
 ## Prerequisites
 

@@ -12,6 +12,7 @@
 #  Usage:
 #    ./demo/reset-eda.sh                         # standalone
 #    ./demo/infrastructure/scenarios/<uc>/reset-eda.sh  # per-UC wrapper calls this
+#    ./demo/gitops/scenarios/<uc>/reset-eda.sh          # GitOps track wrapper
 ###############################################################################
 set -euo pipefail
 

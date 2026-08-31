@@ -2,10 +2,10 @@
 
 ## Before You Begin
 
-- Verify the full setup completed: `./setup/00-prereqs.sh`
-- Open the AAP Controller UI in a browser
-- Open the ServiceNow Developer Instance in another tab
+- Verify the full setup completed: `./setup/health-check.sh` (GitOps checks require `./setup/09-configure-gitops.sh`)
+- Open the AAP Controller UI, ServiceNow, Argo CD, and Gitea (`./setup/show-credentials.sh`)
 - Have a terminal ready for trigger commands
+- Pick a track: infrastructure (`demo/infrastructure/`) or GitOps CNF delivery (`demo/gitops/`)
 
 ## Scenario 1: Worker Node Failure
 
@@ -141,6 +141,45 @@
 > The AI agent identifies which specific MC causes the conflict, something that
 > requires understanding the MCO rendering pipeline.
 
+## GitOps Track: ImagePullBackOff (bad tag)
+
+Presenter script: `demo/gitops/README.md` and
+`demo/gitops/scenarios/01-imagepullbackoff-bad-tag/README.md`.
+
+### Narrative
+
+> "A CNF-like app is delivered by Red Hat OpenShift GitOps. Someone committed a
+> container tag that does not exist in the registry. Argo CD synced it faithfully
+> — Git is correct from Argo's point of view — and the pods are stuck in
+> ImagePullBackOff. The agent must fix Git, not fight Argo with a live patch."
+
+### Steps
+
+1. **Trigger:** `./demo/gitops/scenarios/01-imagepullbackoff-bad-tag/trigger.sh`
+2. Confirm `ImagePullBackOff` in namespace `cnf-gitops-demo` and in the Argo CD
+   UI (Application `cnf-sample`, failed pods). Gitea `cnf-sample` shows
+   `registry.access.redhat.com/ubi9/httpd-24:vf-demo-bad-tag`.
+3. Wait for `DemoCNFImagePullBackOff` (~1 minute `for:`; ~2–3 minutes from
+   trigger). Observe > Alerting, then AAP EDA Rule Audit and Jobs.
+4. Show ServiceNow RCA: Git source of truth, Argo Application `cnf-sample`,
+   approve the git-fix Job Template — do not `oc set image`.
+5. **First run:** launch `Remediate DemoCNFImagePullBackOff` in AAP. Gitea
+   commit restores `registry.access.redhat.com/ubi9/httpd-24:latest`; Argo CD
+   becomes Healthy; pods Running.
+6. **Second run (learning loop):** do not wipe the knowledge base.
+   ```bash
+   ./demo/gitops/scenarios/01-imagepullbackoff-bad-tag/reset-eda.sh
+   ./demo/gitops/scenarios/01-imagepullbackoff-bad-tag/trigger.sh
+   ```
+   KB match auto-launches the same JT; Git + Argo heal without a second approval.
+7. **Cleanup:** `./demo/gitops/scenarios/01-imagepullbackoff-bad-tag/cleanup.sh`
+
+### Key Talking Point
+
+> Remediation is a commit to Gitea. OpenShift GitOps reconciles the cluster.
+> The first incident is human-approved; the second is automatic because the
+> golden git-fix Job Template is already in the knowledge base.
+
 ## Talking Points
 
 - **Closed loop**: From detection to diagnosis to remediation, no human needed
@@ -152,6 +191,8 @@
 - **Infrastructure-grade**: Handles diverse cluster infrastructure layers -- compute
   (nodes), cluster authentication (OAuth/IDP), node resources (disk), and node
   configuration management (MachineConfigPool)
+- **GitOps-correct**: CNF ImagePullBackOff is fixed in Git; Argo CD syncs. Live
+  patches would be reverted by self-heal and would hide the source of truth
 - **Reusable playbooks**: AI-generated playbooks use variables instead of hardcoded
   values, making them reusable for future incidents of the same type
 - **Red Hat stack**: Built entirely on supported Red Hat products with certified

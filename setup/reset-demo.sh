@@ -127,6 +127,109 @@ if oc get mc self-healing-demo-conflict &>/dev/null; then
 else
   skip "No conflicting MachineConfig found"
 fi
+
+echo "   1f. Restoring cnf-sample GitOps app to the known-good image..."
+GOOD_IMAGE="registry.access.redhat.com/ubi9/httpd-24:latest"
+GITEA_USER=$(oc get secret gitea-admin-credentials -n gitea \
+  -o jsonpath='{.data.username}' 2>/dev/null | base64 -d || echo "gitea_admin")
+if [ -n "${GITEA_ROUTE}" ] && [ -n "${GITEA_PASS}" ]; then
+  CNF_UPDATE=$(
+    GITEA_ROUTE="${GITEA_ROUTE}" \
+    GITEA_USER="${GITEA_USER}" \
+    GITEA_PASS="${GITEA_PASS}" \
+    TARGET_IMAGE="${GOOD_IMAGE}" \
+    python3 - <<'PY' 2>/dev/null || true
+import base64, json, os, re, ssl, sys, urllib.error, urllib.request
+
+route = os.environ["GITEA_ROUTE"]
+user = os.environ["GITEA_USER"]
+password = os.environ["GITEA_PASS"]
+target = os.environ["TARGET_IMAGE"]
+url = f"https://{route}/api/v1/repos/{user}/cnf-sample/contents/deployment.yaml"
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+auth = base64.b64encode(f"{user}:{password}".encode()).decode()
+
+
+def call(method, payload=None):
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Basic {auth}",
+    }
+    data = None
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    with urllib.request.urlopen(req, context=ctx) as resp:
+        return json.loads(resp.read().decode())
+
+
+try:
+    body = call("GET")
+except urllib.error.HTTPError as exc:
+    print(f"HTTP {exc.code}")
+    sys.exit(0)
+
+raw = (body.get("content") or "").replace("\n", "")
+text = base64.b64decode(raw).decode()
+sha = body.get("sha") or ""
+if target in text:
+    print("UNCHANGED")
+    sys.exit(0)
+
+updated, n = re.subn(r"(?m)^(\s*)image:\s*\S+", r"\1image: " + target, text, count=1)
+if n == 0:
+    print("NO_IMAGE_LINE")
+    sys.exit(0)
+
+try:
+    call("PUT", {
+        "message": "fix: restore cnf-sample image for self-healing demo",
+        "content": base64.b64encode(updated.encode()).decode(),
+        "sha": sha,
+        "branch": "main",
+    })
+except urllib.error.HTTPError as exc:
+    print(f"HTTP {exc.code}")
+    sys.exit(0)
+
+print("CHANGED")
+PY
+  )
+  case "${CNF_UPDATE}" in
+    CHANGED)
+      ok "Gitea cnf-sample deployment.yaml restored to ${GOOD_IMAGE}"
+      ;;
+    UNCHANGED)
+      skip "Gitea cnf-sample already on known-good image"
+      ;;
+    HTTP\ 404)
+      skip "Gitea cnf-sample repo or deployment.yaml not found"
+      ;;
+    NO_IMAGE_LINE)
+      skip "Gitea cnf-sample deployment.yaml has no image: line"
+      ;;
+    "")
+      skip "Could not update Gitea cnf-sample (API unreachable)"
+      ;;
+    *)
+      fail "Gitea cnf-sample restore returned: ${CNF_UPDATE}"
+      ;;
+  esac
+  if oc get application cnf-sample -n openshift-gitops &>/dev/null; then
+    oc -n openshift-gitops annotate application cnf-sample argocd.argoproj.io/refresh- --overwrite &>/dev/null || true
+    oc -n openshift-gitops annotate application cnf-sample argocd.argoproj.io/refresh=hard --overwrite &>/dev/null \
+      && ok "Argo CD Application cnf-sample hard-refreshed" \
+      || fail "Could not refresh Argo CD Application cnf-sample"
+  else
+    skip "Argo CD Application cnf-sample not found"
+  fi
+else
+  skip "Gitea not reachable -- skipping cnf-sample image restore"
+fi
 echo ""
 
 ###############################################################################
@@ -504,6 +607,7 @@ echo "    UC1  ./demo/infrastructure/scenarios/01-worker-node-failure/trigger.sh
 echo "    UC2  ./demo/infrastructure/scenarios/02-authentication-operator-degraded/trigger.sh"
 echo "    UC3  ./demo/infrastructure/scenarios/03-node-disk-pressure/trigger.sh"
 echo "    UC4  ./demo/infrastructure/scenarios/04-mcp-degraded/trigger.sh"
+echo "    GitOps  ./demo/gitops/scenarios/01-imagepullbackoff-bad-tag/trigger.sh"
 echo ""
 echo "  Show credentials:  ./setup/show-credentials.sh"
 echo ""

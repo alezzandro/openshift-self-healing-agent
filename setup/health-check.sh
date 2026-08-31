@@ -63,11 +63,12 @@ check_csv() {
   fi
 }
 
-check_csv "aap"                      "aap-operator"         "AAP Operator"
-check_csv "redhat-ods-operator"      "rhods-operator"       "OpenShift AI Operator"
-check_csv "openshift-lightspeed"     "lightspeed-operator"  "Lightspeed Operator"
-check_csv "openshift-nfd"            "nfd"                  "NFD Operator"
-check_csv "nvidia-gpu-operator"      "gpu-operator"         "GPU Operator"
+check_csv "aap"                      "aap-operator"              "AAP Operator"
+check_csv "redhat-ods-operator"      "rhods-operator"            "OpenShift AI Operator"
+check_csv "openshift-lightspeed"     "lightspeed-operator"       "Lightspeed Operator"
+check_csv "openshift-nfd"            "nfd"                       "NFD Operator"
+check_csv "nvidia-gpu-operator"      "gpu-operator"              "GPU Operator"
+check_csv "openshift-gitops-operator" "openshift-gitops-operator" "OpenShift GitOps Operator"
 
 # ─────────────────────────────────────────────
 section "3. Red Hat Ansible Automation Platform"
@@ -261,6 +262,15 @@ if [ -n "${GITEA_ROUTE}" ] && [ -n "${GITEA_PASS}" ]; then
   else
     fail "Gitea repo returned HTTP ${REPO_CHECK}"
   fi
+
+  CNF_REPO_CHECK=$(curl -sk -u "gitea_admin:${GITEA_PASS}" \
+    "https://${GITEA_ROUTE}/api/v1/repos/gitea_admin/cnf-sample" \
+    -o /dev/null -w '%{http_code}' 2>/dev/null || echo "000")
+  if [ "${CNF_REPO_CHECK}" = "200" ]; then
+    pass "Gitea repo 'cnf-sample' accessible"
+  else
+    fail "Gitea repo 'cnf-sample' returned HTTP ${CNF_REPO_CHECK}"
+  fi
 fi
 
 # ─────────────────────────────────────────────
@@ -380,6 +390,39 @@ if [ -n "${AAP_POD}" ]; then
   fi
 else
   warn "No running pod in aap namespace to test connectivity"
+fi
+
+# ─────────────────────────────────────────────
+section "11. OpenShift GitOps"
+# ─────────────────────────────────────────────
+
+GITOPS_NS="openshift-gitops"
+GITOPS_SERVER=""
+for name in openshift-gitops-server argocd-server; do
+  if oc get deploy "${name}" -n "${GITOPS_NS}" &>/dev/null; then
+    GITOPS_SERVER="${name}"
+    break
+  fi
+done
+if [ -n "${GITOPS_SERVER}" ]; then
+  check_deploy "${GITOPS_NS}" "${GITOPS_SERVER}" "GitOps server (${GITOPS_SERVER})"
+else
+  fail "GitOps server Deployment not found (tried openshift-gitops-server, argocd-server)"
+fi
+
+if oc get application cnf-sample -n "${GITOPS_NS}" &>/dev/null; then
+  pass "Argo CD Application cnf-sample exists"
+  GITOPS_SYNC=$(oc get application cnf-sample -n "${GITOPS_NS}" \
+    -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "")
+  GITOPS_HEALTH=$(oc get application cnf-sample -n "${GITOPS_NS}" \
+    -o jsonpath='{.status.health.status}' 2>/dev/null || echo "")
+  if [ "${GITOPS_SYNC}" = "Synced" ] && [ "${GITOPS_HEALTH}" = "Healthy" ]; then
+    pass "Argo CD Application cnf-sample is Synced/Healthy"
+  else
+    warn "Argo CD Application cnf-sample sync=${GITOPS_SYNC:-pending} health=${GITOPS_HEALTH:-pending}"
+  fi
+else
+  fail "Argo CD Application cnf-sample not found in ${GITOPS_NS}"
 fi
 
 # ─────────────────────────────────────────────

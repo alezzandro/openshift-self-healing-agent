@@ -79,10 +79,33 @@ if [ -n "${GITEA_ROUTE}" ]; then
   echo "--- Gitea Git Server ---"
   echo "  URL:         https://${GITEA_ROUTE}"
   echo "  Repo:        https://${GITEA_ROUTE}/gitea_admin/remediation-playbooks"
+  echo "  App repo:    https://${GITEA_ROUTE}/gitea_admin/cnf-sample"
   echo "  Username:    gitea_admin"
   echo "  Password:    ${GITEA_PASS}"
 else
   echo "--- Gitea Git Server ---"
+  echo "  [NOT DEPLOYED]"
+fi
+echo ""
+
+ARGO_NS="openshift-gitops"
+ARGO_ROUTE=$(oc get route openshift-gitops-server -n "${ARGO_NS}" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+if [ -z "${ARGO_ROUTE}" ]; then
+  ARGO_ROUTE=$(oc get route argocd-server -n "${ARGO_NS}" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+fi
+ARGO_PASS=$(oc get secret openshift-gitops-cluster -n "${ARGO_NS}" \
+  -o jsonpath='{.data.admin\.password}' 2>/dev/null | base64 -d || echo "")
+if [ -n "${ARGO_ROUTE}" ]; then
+  echo "--- OpenShift GitOps (Argo CD) ---"
+  echo "  URL:         https://${ARGO_ROUTE}"
+  echo "  Username:    admin"
+  [ -n "${ARGO_PASS}" ] && echo "  Password:    ${ARGO_PASS}"
+  echo "  Application: cnf-sample (namespace ${ARGO_NS})"
+  if [ -n "${GITEA_ROUTE}" ]; then
+    echo "  App repo:    https://${GITEA_ROUTE}/gitea_admin/cnf-sample"
+  fi
+else
+  echo "--- OpenShift GitOps (Argo CD) ---"
   echo "  [NOT DEPLOYED]"
 fi
 echo ""
