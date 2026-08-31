@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cnf-sample
+  namespace: openshift-gitops
+spec:
+  project: default
+  source:
+    repoURL: https://REPLACE_GITEA_HOST/gitea_admin/cnf-sample.git
+    targetRevision: main
+    path: .
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnf-gitops-demo
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

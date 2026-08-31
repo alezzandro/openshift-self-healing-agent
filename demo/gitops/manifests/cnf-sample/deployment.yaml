@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cnf-sample
+  namespace: cnf-gitops-demo
+  labels:
+    app: cnf-sample
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cnf-sample
+  template:
+    metadata:
+      labels:
+        app: cnf-sample
+    spec:
+      containers:
+        - name: cnf-sample
+          image: registry.access.redhat.com/ubi9/httpd-24:latest
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
