@@ -14,7 +14,10 @@ spec:
       managementState: Managed
     kueue:
       managementState: Removed
+    # RHOAI 3.5+: Llama Stack Operator replaced by OGX Operator
     llamastackoperator:
+      managementState: Removed
+    ogx:
       managementState: Managed
     modelregistry:
       managementState: Managed
