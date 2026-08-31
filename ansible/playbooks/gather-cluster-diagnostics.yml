@@ -132,6 +132,92 @@
       register: disk_events
       when: alert_name == "NodeFilesystemSpaceFillingUp"
 
+    - name: Default GitOps CNF namespace when missing
+      ansible.builtin.set_fact:
+        alert_namespace: "cnf-gitops-demo"
+      when:
+        - alert_name == "DemoCNFImagePullBackOff"
+        - alert_namespace | length == 0
+
+    - name: Collect pods in the GitOps CNF namespace
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: "{{ alert_namespace }}"
+      register: cnf_ns_pods
+      when:
+        - alert_name == "DemoCNFImagePullBackOff"
+        - alert_namespace | length > 0
+
+    - name: Collect cnf-sample Deployment
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: cnf-sample
+        namespace: "{{ alert_namespace }}"
+      register: cnf_deployment
+      when:
+        - alert_name == "DemoCNFImagePullBackOff"
+        - alert_namespace | length > 0
+
+    - name: Collect Argo CD Application cnf-sample
+      kubernetes.core.k8s_info:
+        api_version: argoproj.io/v1alpha1
+        kind: Application
+        name: cnf-sample
+        namespace: openshift-gitops
+      register: cnf_argo_app
+      when: alert_name == "DemoCNFImagePullBackOff"
+
+    - name: Extract GitOps CNF image and Argo status
+      ansible.builtin.set_fact:
+        _cnf_deployment_image: "{{ (_dep_containers | first | default({})).image | default('') }}"
+        _argo_sync_status: "{{ _sync.status | default('Unknown') }}"
+        _argo_health_status: "{{ _health.status | default('Unknown') }}"
+        _argo_repo_url: "{{ _source.repoURL | default('') }}"
+        _argo_application:
+          name: "{{ _meta.name | default('cnf-sample') }}"
+          namespace: openshift-gitops
+          sync_status: "{{ _sync.status | default('Unknown') }}"
+          health_status: "{{ _health.status | default('Unknown') }}"
+          repo_url: "{{ _source.repoURL | default('') }}"
+      vars:
+        _dep: "{{ (cnf_deployment.resources | default([]))[0] | default({}) }}"
+        _app: "{{ (cnf_argo_app.resources | default([]))[0] | default({}) }}"
+        _dep_spec: "{{ _dep.spec | default({}) }}"
+        _pod_template: "{{ _dep_spec.template | default({}) }}"
+        _pod_spec: "{{ _pod_template.spec | default({}) }}"
+        _dep_containers: "{{ _pod_spec.containers | default([]) }}"
+        _status: "{{ _app.status | default({}) }}"
+        _sync: "{{ _status.sync | default({}) }}"
+        _health: "{{ _status.health | default({}) }}"
+        _spec: "{{ _app.spec | default({}) }}"
+        _source: "{{ _spec.source | default({}) }}"
+        _meta: "{{ _app.metadata | default({}) }}"
+      when: alert_name == "DemoCNFImagePullBackOff"
+
+    - name: Summarize failing CNF pods
+      ansible.builtin.set_fact:
+        _failing_pod_summaries: "{{ _failing_pod_summaries | default([]) + [_summary] }}"
+      vars:
+        _cs0: "{{ item.status.containerStatuses | default([]) | first | default({}) }}"
+        _waiting: "{{ (_cs0.state | default({})).waiting | default({}) }}"
+        _reason: "{{ _waiting.reason | default('') }}"
+        _message: "{{ _waiting.message | default('') }}"
+        _image: "{{ (item.spec.containers | default([]) | first | default({})).image | default('') }}"
+        _summary:
+          name: "{{ item.metadata.name }}"
+          phase: "{{ item.status.phase | default('Unknown') }}"
+          waiting_reason: "{{ _reason }}"
+          waiting_message: "{{ _message | truncate(240, true, '...') }}"
+          image: "{{ _image }}"
+      loop: "{{ cnf_ns_pods.resources | default([]) }}"
+      loop_control:
+        label: "{{ item.metadata.name | default('pod') }}"
+      when:
+        - alert_name == "DemoCNFImagePullBackOff"
+        - (_reason | length > 0) or (item.status.phase | default('') != 'Running')
+
     - name: Calculate not-ready node names
       ansible.builtin.set_fact:
         _not_ready_nodes: "{{ _not_ready_nodes | default([]) + [item.metadata.name] }}"
@@ -179,6 +265,9 @@
           alert_device: "{{ alert_device | default('') }}"
           alert_mountpoint: "{{ alert_mountpoint | default('') }}"
           alert_mcp_name: "{{ alert_mcp_name | default('') }}"
+          argo_application: "{{ _argo_application | default({}) | to_json }}"
+          failing_pods: "{{ _failing_pod_summaries | default([]) | to_json }}"
+          deployment_image: "{{ _cnf_deployment_image | default('') }}"
 
     - name: Build node status table for human summary
       ansible.builtin.set_fact:
@@ -235,6 +324,26 @@
 
           {% if alert_operator_name | length > 0 %}
           AFFECTED OPERATOR: {{ alert_operator_name }}
+          {% endif %}
+
+          {% if alert_name == 'DemoCNFImagePullBackOff' %}
+          GITOPS CNF DIAGNOSTICS
+          -------------------------------------------
+          Namespace: {{ alert_namespace }}
+          Alert pod: {{ alert_pod | default('N/A') }}
+          Deployment cnf-sample image: {{ _cnf_deployment_image | default('unknown') }}
+          Argo Application cnf-sample (openshift-gitops):
+            sync={{ _argo_sync_status | default('Unknown') }}
+            health={{ _argo_health_status | default('Unknown') }}
+            repo={{ _argo_repo_url | default('unknown') }}
+          Failing / non-running pods:
+          {% for pod in _failing_pod_summaries | default([]) %}
+          - {{ pod.name }} phase={{ pod.phase }} reason={{ pod.waiting_reason | default('n/a') }} image={{ pod.image }}
+            {{ pod.waiting_message | default('') }}
+          {% endfor %}
+          {% if _failing_pod_summaries | default([]) | length == 0 %}
+          - None collected (check namespace {{ alert_namespace }})
+          {% endif %}
           {% endif %}
 
           RECENT CLUSTER EVENTS (last 5)

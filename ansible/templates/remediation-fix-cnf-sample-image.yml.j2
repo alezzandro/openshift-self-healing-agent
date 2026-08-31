@@ -1,0 +1,120 @@
+{# Golden GitOps image-fix playbook. Rendered by invoke-ai-new-incident.yml.
+   AAP extra_vars (gitea_url, gitea_password, good_image, ...) are interpolated
+   when the Job Template runs — do not bake secrets in at render time. #}
+{% raw %}
+---
+- name: Restore cnf-sample image in GitOps source of truth
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    gitea_url: "{{ gitea_url }}"
+    gitea_username: "{{ gitea_username }}"
+    gitea_password: "{{ gitea_password }}"
+    good_image: "{{ good_image }}"
+    repo_owner: "{{ repo_owner }}"
+    repo_name: "{{ repo_name }}"
+    file_path: "{{ file_path }}"
+
+  tasks:
+    - name: Build Gitea Contents API URL
+      ansible.builtin.set_fact:
+        gitea_contents_url: "{{ gitea_url | regex_replace('/$', '') }}/api/v1/repos/{{ repo_owner }}/{{ repo_name }}/contents/{{ file_path }}"
+
+    - name: Get current deployment.yaml from Gitea
+      ansible.builtin.uri:
+        url: "{{ gitea_contents_url }}"
+        method: GET
+        user: "{{ gitea_username }}"
+        password: "{{ gitea_password }}"
+        force_basic_auth: true
+        headers:
+          Accept: application/json
+        validate_certs: false
+        status_code: [200]
+      register: gitea_file
+      no_log: true
+
+    - name: Decode deployment.yaml content
+      ansible.builtin.set_fact:
+        cnf_deployment_yaml: "{{ (gitea_file.json.content | default('') | regex_replace('\\n', '')) | b64decode }}"
+
+    - name: Show current Git image versus known-good target
+      ansible.builtin.debug:
+        msg: >-
+          Current Git image line(s):
+          {{ cnf_deployment_yaml | regex_findall('(?m)^\\s*image:\\s*\\S+') | join(', ') }}.
+          Target: {{ good_image }}
+
+    - name: Replace container image with the known-good image
+      ansible.builtin.set_fact:
+        cnf_deployment_yaml_fixed: "{{ cnf_deployment_yaml | regex_replace('(?m)^(\\s*)image:\\s*\\S+', '\\1image: ' ~ good_image) }}"
+
+    - name: Commit restored image to Gitea (source of truth)
+      ansible.builtin.uri:
+        url: "{{ gitea_contents_url }}"
+        method: PUT
+        user: "{{ gitea_username }}"
+        password: "{{ gitea_password }}"
+        force_basic_auth: true
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+        body_format: json
+        body:
+          message: "fix: restore cnf-sample image for self-healing demo"
+          content: "{{ cnf_deployment_yaml_fixed | b64encode }}"
+          sha: "{{ gitea_file.json.sha }}"
+          branch: "main"
+        validate_certs: false
+        status_code: [200, 201]
+      register: gitea_put
+      when: good_image not in cnf_deployment_yaml
+      no_log: true
+
+    - name: Skip commit when Git already has the known-good image
+      ansible.builtin.debug:
+        msg: "Gitea {{ repo_owner }}/{{ repo_name }}/{{ file_path }} already contains {{ good_image }}"
+      when: good_image in cnf_deployment_yaml
+
+    - name: Re-read deployment.yaml from Gitea to verify
+      ansible.builtin.uri:
+        url: "{{ gitea_contents_url }}"
+        method: GET
+        user: "{{ gitea_username }}"
+        password: "{{ gitea_password }}"
+        force_basic_auth: true
+        headers:
+          Accept: application/json
+        validate_certs: false
+        status_code: [200]
+      register: gitea_file_verify
+      no_log: true
+
+    - name: Decode verified deployment.yaml
+      ansible.builtin.set_fact:
+        cnf_verify_yaml: "{{ (gitea_file_verify.json.content | default('') | regex_replace('\\n', '')) | b64decode }}"
+
+    - name: Assert Gitea source of truth now contains the known-good image
+      ansible.builtin.assert:
+        that:
+          - good_image in cnf_verify_yaml
+        fail_msg: "Gitea {{ file_path }} does not contain {{ good_image }} after update"
+        success_msg: "Gitea source of truth updated to {{ good_image }}"
+
+    # Verification only — do not live-patch the Deployment. Argo CD must sync Git.
+    - name: Wait for Argo CD to sync restored image onto the live Deployment
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        name: cnf-sample
+        namespace: cnf-gitops-demo
+      register: synced_deploy
+      until: >-
+        (synced_deploy.resources | default([]) | length > 0)
+        and ((synced_deploy.resources[0].spec.template.spec.containers | default([{}]))[0].image | default('')) == good_image
+      retries: 18
+      delay: 10
+      ignore_errors: true
+{% endraw %}

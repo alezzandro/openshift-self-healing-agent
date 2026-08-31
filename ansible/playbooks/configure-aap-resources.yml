@@ -251,6 +251,12 @@
           snow_ai_username: "{{ snow_ai_username }}"
           snow_ai_password: "{{ snow_ai_password }}"
           snow_ai_user_sysid: "{{ snow_ai_user_sysid }}"
+          # Passed through to invoke-ai-new-incident.yml so it can create the
+          # GitOps remediation JT (Remediate DemoCNFImagePullBackOff) with
+          # Gitea Contents API extra_vars. No Gitea Machine credential exists
+          # for ansible.builtin.uri; password is stored on that JT as extra_vars
+          # (demo risk). If GITEA_ADMIN_PASSWORD is rotated, re-run this playbook
+          # AND update or recreate Remediate DemoCNFImagePullBackOff.
           gitea_host: "{{ gitea_host }}"
           gitea_password: "{{ gitea_password }}"
           aap_controller_host: "{{ controller_host }}"

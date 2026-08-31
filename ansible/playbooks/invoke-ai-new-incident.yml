@@ -14,6 +14,7 @@
         alert_severity: "{{ alert_severity | default('warning') }}"
         alert_namespace: "{{ alert_namespace | default('') }}"
         alert_node: "{{ alert_node | default('') }}"
+        alert_pod: "{{ alert_pod | default('') }}"
         alert_operator_name: "{{ alert_operator_name | default('') }}"
         alert_mcp_name: "{{ alert_mcp_name | default('') }}"
         diagnostics: "{{ diagnostics | default({}) }}"
@@ -51,6 +52,28 @@
         src: /tmp/system-prompt.txt
       register: system_prompt_content
 
+    - name: Build OpenShift Lightspeed query
+      ansible.builtin.set_fact:
+        ols_query: >-
+          {% if alert_name == 'DemoCNFImagePullBackOff' %}
+          OpenShift GitOps (Argo CD) Application cnf-sample synced a Deployment
+          whose image cannot be pulled (ImagePullBackOff) in namespace
+          {{ alert_namespace | default('cnf-gitops-demo') }}.
+          Pod: {{ alert_pod | default('N/A') }}.
+          Current image: {{ diagnostics.deployment_image | default('unknown') }}.
+          How should operators restore a known-good image using Git as the
+          source of truth so Argo CD reconciles, without live-patching the
+          Deployment?
+          {% else %}
+          OpenShift alert {{ alert_name }} has fired.
+          Description: {{ alert_description }}.
+          Affected node: {{ alert_node | default('N/A') }}.
+          Not-ready nodes: {{ diagnostics.not_ready_nodes | default([]) | join(', ') | default('None') }}.
+          Degraded operators: {{ diagnostics.degraded_operator_names | default([]) | join(', ') | default('None') }}.
+          What are the recommended remediation steps using Ansible
+          kubernetes.core modules (k8s_info, k8s, k8s_drain)?
+          {% endif %}
+
     # ── Step 0.5: RAG — query OpenShift Lightspeed for documentation context ──
 
     - name: Read OpenShift Lightspeed SA token from cluster secret
@@ -72,14 +95,7 @@
         method: POST
         body_format: json
         body:
-          query: >-
-            OpenShift alert {{ alert_name }} has fired.
-            Description: {{ alert_description }}.
-            Affected node: {{ alert_node | default('N/A') }}.
-            Not-ready nodes: {{ diagnostics.not_ready_nodes | default([]) | join(', ') | default('None') }}.
-            Degraded operators: {{ diagnostics.degraded_operator_names | default([]) | join(', ') | default('None') }}.
-            What are the recommended remediation steps using Ansible
-            kubernetes.core modules (k8s_info, k8s, k8s_drain)?
+          query: "{{ ols_query }}"
         headers:
           Content-Type: application/json
           Accept: application/json
@@ -166,6 +182,24 @@
         kb_context: "(No operational knowledge base configured.)"
       when: kb_context is not defined
 
+    - name: Build GitOps alert context for AI
+      ansible.builtin.set_fact:
+        gitops_ai_context: >-
+          This is a GitOps CNF delivery failure (bad image tag synced by Argo CD).
+          Namespace: {{ alert_namespace | default('cnf-gitops-demo') }}.
+          Pod: {{ alert_pod | default('N/A') }}.
+          Deployment cnf-sample image: {{ diagnostics.deployment_image | default('N/A') }}.
+          Argo Application cnf-sample: {{ diagnostics.argo_application | default('{}') }}.
+          Failing pods: {{ diagnostics.failing_pods | default('[]') }}.
+          Remediation MUST commit the corrected image to Gitea; Argo CD will sync.
+          Do not live-patch the live Deployment.
+      when: alert_name == "DemoCNFImagePullBackOff"
+
+    - name: Set empty GitOps context for other alerts
+      ansible.builtin.set_fact:
+        gitops_ai_context: ""
+      when: alert_name != "DemoCNFImagePullBackOff"
+
     # ── Step 1: Call AI for RCA + Playbook generation ──
 
     - name: Call LlamaStack Chat Completions API for RCA and playbook
@@ -184,8 +218,16 @@
 
                 {{ rag_context }}
 
+                {{ gitops_ai_context }}
+
                 Analyze this alert and respond with ALL THREE sections.
                 SECTION 1: Write a 3-5 sentence Root Cause Analysis (plain language, no YAML).
+                {% if alert_name == 'DemoCNFImagePullBackOff' %}
+                SECTION 2: Write ---PLAYBOOK--- then a short localhost stub playbook.
+                The workflow will attach the approved Gitea git-fix playbook.
+                SECTION 3: Write ---EXTRA_VARS--- then a single-line JSON object that includes
+                {"good_image":"registry.access.redhat.com/ubi9/httpd-24:latest"}.
+                {% else %}
                 SECTION 2: Write ---PLAYBOOK--- then a complete, REUSABLE Ansible remediation
                 playbook using ONLY kubernetes.core modules (k8s_info, k8s, k8s_drain). The
                 playbook MUST use variables (declared in the vars: block) for ALL incident-specific
@@ -193,6 +235,7 @@
                 values into the tasks.
                 SECTION 3: Write ---EXTRA_VARS--- then a single-line JSON object mapping each
                 playbook variable to the correct value for THIS specific incident.
+                {% endif %}
                 Keep the RCA concise (max 5 sentences) so you have room for the full playbook.
                 Alert: {{ alert_name }}.
                 Description: {{ alert_description }}.
@@ -289,6 +332,7 @@
                 Affected node: {{ alert_node | default('N/A') }}.
                 Not-ready nodes: {{ diagnostics.not_ready_nodes | default([]) | join(', ') | default('None') }}.
                 Degraded operators: {{ diagnostics.degraded_operator_names | default([]) | join(', ') | default('None') }}.
+                {{ gitops_ai_context }}
           max_tokens: 400
           temperature: 0.3
         headers:
@@ -328,6 +372,15 @@
           failed rollouts, or configuration drift in the operator's managed
           namespace. Degraded operators may reduce cluster functionality and
           should be investigated promptly.
+          {% elif alert_name == 'DemoCNFImagePullBackOff' %}
+          The cnf-sample workload in namespace
+          {{ alert_namespace | default('cnf-gitops-demo') }} is stuck in
+          ImagePullBackOff after OpenShift GitOps (Argo CD) synced Application
+          "cnf-sample". The cluster is applying the image declared in the Gitea
+          source of truth (gitea_admin/cnf-sample, deployment.yaml); a bad or
+          missing tag in Git is the most likely cause. Live-patching the
+          Deployment would be reverted on the next sync. Restore the known-good
+          UBI image in Git and let Argo CD reconcile.
           {% elif 'etcd' in alert_name %}
           One or more etcd members are down, which reduces the quorum
           margin for the cluster control plane. If additional members fail,
@@ -344,6 +397,22 @@
           AI-generated remediation playbook, then launch the corresponding
           AAP Job Template.
       when: ai_rca | trim | length == 0
+
+    - name: Use golden GitOps image-fix playbook for DemoCNFImagePullBackOff
+      ansible.builtin.set_fact:
+        playbook_filename: "fix-cnf-sample-image.yml"
+        ai_playbook: "{{ lookup('template', playbook_dir ~ '/../templates/remediation-fix-cnf-sample-image.yml.j2') }}"
+        ai_extra_vars: >-
+          {{ (ai_extra_vars | default({})) | combine({
+            'good_image': 'registry.access.redhat.com/ubi9/httpd-24:latest',
+            'repo_owner': 'gitea_admin',
+            'repo_name': 'cnf-sample',
+            'file_path': 'deployment.yaml',
+            'gitea_url': 'https://' ~ gitea_host,
+            'gitea_username': 'gitea_admin',
+            'gitea_password': gitea_password
+          }, recursive=True) }}
+      when: alert_name == "DemoCNFImagePullBackOff"
 
     - name: Display AI analysis
       ansible.builtin.debug:
@@ -501,12 +570,26 @@
             {% if ai_extra_vars | default({}) | length > 0 %}
             - Extra variables (pre-filled for this incident):
             {% for k, v in (ai_extra_vars | default({})).items() %}
-              {{ k }}: {{ v }}
+              {{ k }}: {{ '(redacted)' if k in ['gitea_password'] else v }}
             {% endfor %}
             {% else %}
             - Extra variables: none required
             {% endif %}
 
+            {% if alert_name == 'DemoCNFImagePullBackOff' %}
+            GITOPS REMEDIATION
+            Approve and launch JT to commit image fix to Gitea; Argo CD will sync.
+            Do not live-patch the Deployment — the Git repository is the source of truth.
+
+            HOW TO LAUNCH
+            1. Review the playbook in Gitea (link above) — it updates
+               gitea_admin/cnf-sample deployment.yaml via the Gitea API
+            2. Open AAP Console > Resources > Templates
+            3. Find "{{ remediation_jt_name }}" and click the rocket icon to Launch
+            4. Verify extra variables (good_image, repo) then click Next > Launch
+            5. Wait for Argo CD Application cnf-sample to sync the restored image
+            6. Update this incident with the execution results
+            {% else %}
             HOW TO LAUNCH
             1. Review the playbook in Gitea (link above)
             2. Open AAP Console > Resources > Templates
@@ -518,6 +601,7 @@
             {% endif %}
             5. Monitor the job output for success or failure
             6. Update this incident with the execution results
+            {% endif %}
       when:
         - snow_incident_number | length > 0
         - snow_host | length > 0

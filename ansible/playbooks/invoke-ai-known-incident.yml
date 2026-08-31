@@ -119,6 +119,11 @@
           {{ ai_extra_vars | default({}) }}
 
     # ── Step 2: Launch the existing Job Template ──
+    # GitOps (DemoCNFImagePullBackOff): the prior JT extra_vars already include
+    # gitea_url / gitea_password / good_image from first-run invoke-ai. AAP merges
+    # those with launch extra_vars. If GITEA_ADMIN_PASSWORD was rotated, update
+    # the Remediate DemoCNFImagePullBackOff JT extra_vars (or re-seed via a new
+    # incident) before auto-launch will authenticate to Gitea.
 
     - name: Launch the known remediation Job Template
       ansible.controller.job_launch:

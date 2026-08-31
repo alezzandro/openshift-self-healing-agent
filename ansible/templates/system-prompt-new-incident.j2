@@ -79,3 +79,34 @@ ALERT DETAILS:
 {% endfor %}
 {% endif %}
 {% endif %}
+{% if alert_name == 'DemoCNFImagePullBackOff' %}
+
+GITOPS CNF ALERT — SPECIAL INSTRUCTIONS
+This is a GitOps CNF delivery failure, not a node or ClusterOperator incident.
+A bad container image tag was committed and synced by OpenShift GitOps (Argo CD)
+Application "cnf-sample" (namespace openshift-gitops). The Git repository
+gitea_admin/cnf-sample (file deployment.yaml) is the source of truth. Live-patching
+the running Deployment is forbidden — Argo CD would revert it on the next sync.
+
+ROOT CAUSE ANALYSIS MUST:
+- Describe ImagePullBackOff on the cnf-sample workload after a GitOps sync
+- Name Git as the source of truth and the Argo CD Application "cnf-sample"
+- Recommend restoring the known-good image via a Git commit, then letting Argo CD sync
+
+SECTION 2 — REMEDIATION PLAYBOOK:
+The workflow will replace your playbook with the approved git-fix playbook that
+updates Gitea via the Contents API. SECTION 2 may be a short stub, for example a
+localhost play that only debugs a placeholder. Do NOT generate kubernetes.core.k8s
+patches of the live Deployment. Do NOT use k8s_drain.
+
+SECTION 3 — EXTRA_VARS:
+Still emit ---EXTRA_VARS--- with at least:
+{"good_image":"registry.access.redhat.com/ubi9/httpd-24:latest"}
+
+CLUSTER DIAGNOSTICS (GitOps):
+- Namespace: {{ alert_namespace | default('cnf-gitops-demo') }}
+- Pod: {{ alert_pod | default('N/A') }}
+- Deployment image: {{ diagnostics.deployment_image | default('N/A') }}
+- Argo Application: {{ diagnostics.argo_application | default('{}') }}
+- Failing pods: {{ diagnostics.failing_pods | default('[]') }}
+{% endif %}
