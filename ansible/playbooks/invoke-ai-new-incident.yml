@@ -405,6 +405,7 @@
         ai_extra_vars: >-
           {{ (ai_extra_vars | default({})) | combine({
             'good_image': 'registry.access.redhat.com/ubi9/httpd-24:latest',
+            'target_namespace': alert_namespace | default('cnf-gitops-demo'),
             'repo_owner': 'gitea_admin',
             'repo_name': 'cnf-sample',
             'file_path': 'deployment.yaml',
@@ -474,7 +475,21 @@
              | trim }}
       when: ai_playbook | length > 0
 
-    - name: Push playbook to Gitea via API
+    - name: Check whether playbook already exists in Gitea
+      ansible.builtin.uri:
+        url: "https://{{ gitea_host }}/api/v1/repos/gitea_admin/remediation-playbooks/contents/playbooks/{{ playbook_filename }}"
+        method: GET
+        user: "gitea_admin"
+        password: "{{ gitea_password }}"
+        force_basic_auth: true
+        headers:
+          Accept: application/json
+        status_code: [200, 404]
+        validate_certs: false
+      register: gitea_playbook_lookup
+      when: ai_playbook | length > 0
+
+    - name: Create playbook in Gitea via API
       ansible.builtin.uri:
         url: "https://{{ gitea_host }}/api/v1/repos/gitea_admin/remediation-playbooks/contents/playbooks/{{ playbook_filename }}"
         method: POST
@@ -488,10 +503,36 @@
         body:
           message: "AI-generated remediation for {{ alert_name }}"
           content: "{{ ai_playbook | b64encode }}"
-        status_code: [200, 201, 409, 422]
+          branch: "main"
+        status_code: [201]
         validate_certs: false
-      register: git_push_result
-      when: ai_playbook | length > 0
+      register: git_create_result
+      when:
+        - ai_playbook | length > 0
+        - gitea_playbook_lookup.status == 404
+
+    - name: Update existing playbook in Gitea via API
+      ansible.builtin.uri:
+        url: "https://{{ gitea_host }}/api/v1/repos/gitea_admin/remediation-playbooks/contents/playbooks/{{ playbook_filename }}"
+        method: PUT
+        user: "gitea_admin"
+        password: "{{ gitea_password }}"
+        force_basic_auth: true
+        headers:
+          Content-Type: application/json
+          Accept: application/json
+        body_format: json
+        body:
+          message: "AI-generated remediation for {{ alert_name }}"
+          content: "{{ ai_playbook | b64encode }}"
+          sha: "{{ gitea_playbook_lookup.json.sha }}"
+          branch: "main"
+        status_code: [200]
+        validate_certs: false
+      register: git_update_result
+      when:
+        - ai_playbook | length > 0
+        - gitea_playbook_lookup.status == 200
 
     # ── Step 4: Sync AAP project and create Job Template ──
 

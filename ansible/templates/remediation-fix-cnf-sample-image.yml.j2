@@ -13,6 +13,7 @@
     gitea_username: "{{ gitea_username }}"
     gitea_password: "{{ gitea_password }}"
     good_image: "{{ good_image }}"
+    target_namespace: "{{ target_namespace }}"
     repo_owner: "{{ repo_owner }}"
     repo_name: "{{ repo_name }}"
     file_path: "{{ file_path }}"
@@ -109,7 +110,7 @@
         api_version: apps/v1
         kind: Deployment
         name: cnf-sample
-        namespace: cnf-gitops-demo
+        namespace: "{{ target_namespace }}"
       register: synced_deploy
       until: >-
         (synced_deploy.resources | default([]) | length > 0)
