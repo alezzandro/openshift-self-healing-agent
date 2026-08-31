@@ -51,5 +51,5 @@ echo ""
 
 echo "=== Monitoring configuration complete ==="
 echo "Alerts KubeNodeNotReady, ClusterOperatorDegraded, NodeFilesystemSpaceFillingUp,"
-echo "and MCPDegraded are now configured with 1-minute 'for' durations and will route to EDA."
+echo "MCPDegraded, and DemoCNFImagePullBackOff are now configured with 1-minute 'for' durations and will route to EDA."
 echo "Nodes hosting critical self-healing workloads are labeled as protected."

@@ -18,7 +18,7 @@ stringData:
       routes:
         - receiver: 'eda-webhook'
           matchers:
-            - alertname=~"KubeNodeNotReady|ClusterOperatorDegraded|NodeFilesystemSpaceFillingUp|NodeFilesystemAlmostOutOfSpace|KubeNodePressure|MCPDegraded"
+            - alertname=~"KubeNodeNotReady|ClusterOperatorDegraded|NodeFilesystemSpaceFillingUp|NodeFilesystemAlmostOutOfSpace|KubeNodePressure|MCPDegraded|DemoCNFImagePullBackOff"
           continue: true
 
     receivers:
