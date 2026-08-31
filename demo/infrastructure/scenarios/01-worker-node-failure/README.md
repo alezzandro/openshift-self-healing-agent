@@ -54,7 +54,7 @@ oc get nodes -o wide
 ### 2. Trigger the failure
 
 ```bash
-./demo/scenarios/01-worker-node-failure/trigger.sh
+./demo/infrastructure/scenarios/01-worker-node-failure/trigger.sh
 ```
 
 The script will show which node it selected and ask for confirmation.
@@ -119,7 +119,7 @@ template in the knowledge base, and Step 4b will auto-launch it.
 ## Cleanup
 
 ```bash
-./demo/scenarios/01-worker-node-failure/cleanup.sh
+./demo/infrastructure/scenarios/01-worker-node-failure/cleanup.sh
 ```
 
 Or reset the full environment:

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../setup/ensure-authenticated.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../../setup/ensure-authenticated.sh"
 
 echo "=== Scenario 3: Node Disk Pressure ==="
 echo "This will fill a worker node's filesystem with a large temporary file,"
@@ -117,4 +117,4 @@ echo ""
 echo "Watch:    oc get node ${WORKER} -o jsonpath='{.status.conditions}' | python3 -m json.tool"
 echo "Console:  Observe > Alerting > KubeNodePressure"
 echo ""
-echo "To clean up:  ./demo/scenarios/03-node-disk-pressure/cleanup.sh"
+echo "To clean up:  ./demo/infrastructure/scenarios/03-node-disk-pressure/cleanup.sh"

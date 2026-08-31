@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../setup/ensure-authenticated.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../../setup/ensure-authenticated.sh"
 
 echo "=== Scenario 2: Authentication Operator Degraded ==="
 echo "This will add a broken HTPasswd identity provider that references a"
@@ -81,4 +81,4 @@ echo ""
 echo "Watch workflow:  AAP > Jobs (look for 'self-healing-workflow')"
 echo "Watch operator:  oc get clusteroperator authentication -w"
 echo ""
-echo "To clean up:  ./demo/scenarios/02-authentication-operator-degraded/cleanup.sh"
+echo "To clean up:  ./demo/infrastructure/scenarios/02-authentication-operator-degraded/cleanup.sh"

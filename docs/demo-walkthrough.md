@@ -19,7 +19,7 @@
 
 1. **Trigger the failure:**
    ```bash
-   ./demo/scenarios/01-worker-node-failure/trigger.sh
+   ./demo/infrastructure/scenarios/01-worker-node-failure/trigger.sh
    ```
 
 2. **Watch Prometheus** (optional): In the OpenShift console, navigate to
@@ -46,7 +46,7 @@
 
 7. **Clean up:**
    ```bash
-   ./demo/scenarios/01-worker-node-failure/cleanup.sh
+   ./demo/infrastructure/scenarios/01-worker-node-failure/cleanup.sh
    ```
 
 ### Second Run (Self-Learning Demo)
@@ -70,14 +70,14 @@
 
 ### Steps
 
-1. **Trigger:** `./demo/scenarios/02-authentication-operator-degraded/trigger.sh`
+1. **Trigger:** `./demo/infrastructure/scenarios/02-authentication-operator-degraded/trigger.sh`
 2. The script waits ~90 seconds for the operator to transition to `Degraded=True`
 3. Wait for `ClusterOperatorDegraded{name="authentication"}` alert (~1 min after degradation)
 4. Watch the workflow in AAP -- point out the diagnostics step collecting the
    OAuth configuration showing the broken identity provider reference
 5. Show the RCA in ServiceNow identifying the missing Secret as root cause
 6. Show the AI-generated playbook in Gitea that removes the broken IDP entry
-7. **Cleanup:** `./demo/scenarios/02-authentication-operator-degraded/cleanup.sh`
+7. **Cleanup:** `./demo/infrastructure/scenarios/02-authentication-operator-degraded/cleanup.sh`
 
 ### Key Talking Point
 
@@ -99,13 +99,13 @@
 
 ### Steps
 
-1. **Trigger:** `./demo/scenarios/03-node-disk-pressure/trigger.sh`
+1. **Trigger:** `./demo/infrastructure/scenarios/03-node-disk-pressure/trigger.sh`
 2. Wait for `NodeFilesystemSpaceFillingUp` alert (~1 min)
 3. Watch the workflow -- show the diagnostics identifying the DiskPressure node
    condition and the affected filesystem
 4. Show the RCA in ServiceNow explaining the disk usage pattern
 5. Show the generated playbook targeting the specific node and filesystem
-6. **Cleanup:** `./demo/scenarios/03-node-disk-pressure/cleanup.sh`
+6. **Cleanup:** `./demo/infrastructure/scenarios/03-node-disk-pressure/cleanup.sh`
 
 ### Key Talking Point
 
@@ -126,13 +126,13 @@
 
 ### Steps
 
-1. **Trigger:** `./demo/scenarios/04-mcp-degraded/trigger.sh`
+1. **Trigger:** `./demo/infrastructure/scenarios/04-mcp-degraded/trigger.sh`
 2. Wait for `MCPDegraded` alert (~1 min)
 3. Watch the workflow -- show the diagnostics collecting MCP conditions and the
    list of MachineConfigs
 4. Show the RCA in ServiceNow identifying the conflicting MachineConfig
 5. Show the playbook that deletes the conflicting MC to unblock the pool
-6. **Cleanup:** `./demo/scenarios/04-mcp-degraded/cleanup.sh`
+6. **Cleanup:** `./demo/infrastructure/scenarios/04-mcp-degraded/cleanup.sh`
 
 ### Key Talking Point
 

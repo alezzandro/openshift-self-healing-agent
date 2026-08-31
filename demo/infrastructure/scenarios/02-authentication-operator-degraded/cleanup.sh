@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../setup/ensure-authenticated.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../../setup/ensure-authenticated.sh"
 
 echo "=== Cleanup: Authentication Operator Degraded ==="
 

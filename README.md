@@ -201,7 +201,12 @@ All scenarios target **cluster infrastructure**, not user workloads:
 | 4 | MachineConfigPool Degraded | Node Configuration | `MCPDegraded` |
 
 Each scenario has its own `README.md` with a full presenter script and talking points.
-See `demo/scenarios/<scenario>/README.md`.
+See `demo/infrastructure/scenarios/<scenario>/README.md`.
+
+## Demo Tracks
+
+- `demo/infrastructure/` contains the Day-2 infrastructure self-healing scenarios for node, operator, disk, and MCP incidents.
+- `demo/gitops/` is reserved for the GitOps CNF delivery track built around Red Hat OpenShift GitOps.
 
 ## Prerequisites
 
@@ -276,12 +281,12 @@ cd openshift-self-healing-agent
 ./setup/full-setup.sh
 
 # 3. Trigger a demo scenario
-./demo/scenarios/01-worker-node-failure/trigger.sh
+./demo/infrastructure/scenarios/01-worker-node-failure/trigger.sh
 
 # 4. Watch the workflow in AAP UI and ServiceNow
 
 # 5. Clean up the scenario
-./demo/scenarios/01-worker-node-failure/cleanup.sh
+./demo/infrastructure/scenarios/01-worker-node-failure/cleanup.sh
 
 # 6. Reset the full environment for the next demo run
 ./setup/reset-demo.sh
@@ -374,8 +379,11 @@ This cleans:
 ├── mcp-servers/                 # MCP server Containerfiles
 │   ├── servicenow-mcp/
 │   └── git-mcp/
-└── demo/                        # Demo scenario scripts
-    └── scenarios/
+└── demo/                        # Demo scenario tracks
+    ├── infrastructure/          # Day-2 infrastructure self-healing scenarios
+    │   └── scenarios/
+    └── gitops/                  # GitOps CNF delivery track shell
+        └── scenarios/
 ```
 
 ## Documentation

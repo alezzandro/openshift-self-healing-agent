@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../setup/ensure-authenticated.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../../setup/ensure-authenticated.sh"
 
 echo "=== Scenario 4: MachineConfigPool Degraded ==="
 echo "This will apply a conflicting MachineConfig that prevents the MCO from"
@@ -75,4 +75,4 @@ echo ""
 echo "IMPORTANT: No nodes will reboot. The MCO render failed before scheduling"
 echo "any drain/reboot. Existing node configuration is untouched."
 echo ""
-echo "To clean up:  ./demo/scenarios/04-mcp-degraded/cleanup.sh"
+echo "To clean up:  ./demo/infrastructure/scenarios/04-mcp-degraded/cleanup.sh"

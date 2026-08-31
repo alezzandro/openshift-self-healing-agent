@@ -11,7 +11,7 @@
 #
 #  Usage:
 #    ./demo/reset-eda.sh                         # standalone
-#    ./demo/scenarios/<uc>/reset-eda.sh           # per-UC wrapper calls this
+#    ./demo/infrastructure/scenarios/<uc>/reset-eda.sh  # per-UC wrapper calls this
 ###############################################################################
 set -euo pipefail
 

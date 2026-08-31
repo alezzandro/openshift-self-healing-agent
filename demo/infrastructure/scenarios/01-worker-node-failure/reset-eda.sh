@@ -20,4 +20,4 @@
 #    5. ./cleanup.sh            → final cleanup
 ###############################################################################
 
-exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../reset-eda.sh"
+exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../reset-eda.sh"

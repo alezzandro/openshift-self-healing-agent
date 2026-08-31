@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../setup/ensure-authenticated.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../../setup/ensure-authenticated.sh"
 
 echo "=== Scenario 1: Worker Node Failure ==="
 echo "This will cordon, drain, and stop the kubelet on a worker node,"
@@ -102,4 +102,4 @@ echo ""
 echo "Watch the node:     oc get node ${WORKER} -w"
 echo "Watch alerts:        oc get prometheusrule -A"
 echo ""
-echo "To clean up:         ./demo/scenarios/01-worker-node-failure/cleanup.sh"
+echo "To clean up:         ./demo/infrastructure/scenarios/01-worker-node-failure/cleanup.sh"

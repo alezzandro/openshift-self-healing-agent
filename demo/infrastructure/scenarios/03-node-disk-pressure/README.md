@@ -63,7 +63,7 @@ oc adm top nodes
 ### 2. Trigger the failure
 
 ```bash
-./demo/scenarios/03-node-disk-pressure/trigger.sh
+./demo/infrastructure/scenarios/03-node-disk-pressure/trigger.sh
 ```
 
 > "We're writing a large file to the node's filesystem. In production this
@@ -119,7 +119,7 @@ In **Gitea** > `remediation-playbooks`:
 ## Cleanup
 
 ```bash
-./demo/scenarios/03-node-disk-pressure/cleanup.sh
+./demo/infrastructure/scenarios/03-node-disk-pressure/cleanup.sh
 ```
 
 Or reset the full environment:

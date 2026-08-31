@@ -73,7 +73,7 @@ oc get oauth cluster -o yaml | head -20
 ### 2. Trigger the failure
 
 ```bash
-./demo/scenarios/02-authentication-operator-degraded/trigger.sh
+./demo/infrastructure/scenarios/02-authentication-operator-degraded/trigger.sh
 ```
 
 > "We added a broken HTPasswd identity provider that references a Secret named
@@ -137,7 +137,7 @@ In **Gitea** > `remediation-playbooks`:
 ## Cleanup
 
 ```bash
-./demo/scenarios/02-authentication-operator-degraded/cleanup.sh
+./demo/infrastructure/scenarios/02-authentication-operator-degraded/cleanup.sh
 ```
 
 Or reset the full environment:

@@ -66,7 +66,7 @@ oc get mc --sort-by=.metadata.creationTimestamp | tail -10
 ### 2. Trigger the failure
 
 ```bash
-./demo/scenarios/04-mcp-degraded/trigger.sh
+./demo/infrastructure/scenarios/04-mcp-degraded/trigger.sh
 ```
 
 > "We applied a MachineConfig that uses an Ignition `append` directive. The
@@ -125,7 +125,7 @@ In **Gitea** > `remediation-playbooks`:
 ## Cleanup
 
 ```bash
-./demo/scenarios/04-mcp-degraded/cleanup.sh
+./demo/infrastructure/scenarios/04-mcp-degraded/cleanup.sh
 ```
 
 Or reset the full environment:
