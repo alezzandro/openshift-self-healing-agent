@@ -158,7 +158,7 @@ Presenter script: `demo/gitops/README.md` and
 1. **Trigger:** `./demo/gitops/scenarios/01-imagepullbackoff-bad-tag/trigger.sh`
 2. Confirm `ImagePullBackOff` in namespace `cnf-gitops-demo` and in the Argo CD
    UI (Application `cnf-sample`, failed pods). Gitea `cnf-sample` shows
-   `registry.access.redhat.com/ubi9/httpd-24:vf-demo-bad-tag`.
+   `registry.access.redhat.com/ubi9/httpd-24:demo-bad-tag`.
 3. Wait for `DemoCNFImagePullBackOff` (~1 minute `for:`; ~2–3 minutes from
    trigger). Observe > Alerting, then AAP EDA Rule Audit and Jobs.
 4. Show ServiceNow RCA: Git source of truth, Argo Application `cnf-sample`,

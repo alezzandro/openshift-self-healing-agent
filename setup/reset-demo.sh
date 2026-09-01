@@ -60,7 +60,7 @@ fi
 ###############################################################################
 echo "1. Restoring OpenShift cluster health..."
 
-echo "   1a. Uncordoning any cordoned worker nodes (UC1)..."
+echo "   1a. Uncordoning any cordoned worker nodes (Use Case 1)..."
 CORDONED=$(oc get nodes --no-headers -o custom-columns='NAME:.metadata.name,SCHED:.spec.unschedulable' 2>/dev/null \
   | grep "true" | awk '{print $1}' || true)
 if [ -n "${CORDONED}" ]; then
@@ -71,7 +71,7 @@ else
   skip "No cordoned nodes found"
 fi
 
-echo "   1b. Checking for NotReady worker nodes (UC1)..."
+echo "   1b. Checking for NotReady worker nodes (Use Case 1)..."
 NOT_READY=$(oc get nodes -l 'node-role.kubernetes.io/worker' --no-headers \
   -o custom-columns='NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status' 2>/dev/null \
   | grep -v "True" | awk '{print $1}' || true)
@@ -87,7 +87,7 @@ else
   skip "All worker nodes are Ready"
 fi
 
-echo "   1c. Removing broken identity provider if present (UC2)..."
+echo "   1c. Removing broken identity provider if present (Use Case 2)..."
 BROKEN_IDP_IDX=$(oc get oauth cluster -o json 2>/dev/null \
   | python3 -c "
 import sys, json
@@ -603,8 +603,8 @@ fi
 echo "  The demo environment is ready for a fresh run."
 echo ""
 echo "  Trigger a scenario:"
-echo "    UC1  ./demo/infrastructure/scenarios/01-worker-node-failure/trigger.sh"
-echo "    UC2  ./demo/infrastructure/scenarios/02-authentication-operator-degraded/trigger.sh"
+echo "    Use Case 1  ./demo/infrastructure/scenarios/01-worker-node-failure/trigger.sh"
+echo "    Use Case 2  ./demo/infrastructure/scenarios/02-authentication-operator-degraded/trigger.sh"
 echo "    UC3  ./demo/infrastructure/scenarios/03-node-disk-pressure/trigger.sh"
 echo "    UC4  ./demo/infrastructure/scenarios/04-mcp-degraded/trigger.sh"
 echo "    GitOps  ./demo/gitops/scenarios/01-imagepullbackoff-bad-tag/trigger.sh"

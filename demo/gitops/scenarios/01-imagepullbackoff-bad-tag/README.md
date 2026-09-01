@@ -10,7 +10,7 @@ Argo CD remains the reconciler.
 
 ## Demo Layer
 
-**GitOps CNF delivery** -- post-deploy failure intelligence (customer UC2).
+**GitOps CNF delivery** -- post-deploy failure intelligence (Customer use case).
 The source of truth is the Gitea `cnf-sample` repository; OpenShift GitOps
 Application `cnf-sample` syncs it into namespace `cnf-gitops-demo`.
 
@@ -26,7 +26,7 @@ Application `cnf-sample` syncs it into namespace `cnf-gitops-demo`.
 ## What Happens
 
 1. `trigger.sh` updates `deployment.yaml` in Gitea repo `cnf-sample` to
-   `registry.access.redhat.com/ubi9/httpd-24:vf-demo-bad-tag` via the Gitea
+   `registry.access.redhat.com/ubi9/httpd-24:demo-bad-tag` via the Gitea
    Contents API.
 2. The script annotates Argo CD Application `cnf-sample` with
    `argocd.argoproj.io/refresh=hard` so the bad revision is pulled promptly.
@@ -84,7 +84,7 @@ confirm Application `cnf-sample` is Synced / Healthy.
 
 Walk through the three steps (Gitea commit, Argo hard refresh, wait for
 `ImagePullBackOff`). Confirm in Argo CD that pods are failing, then in
-**Gitea** that `deployment.yaml` now references `vf-demo-bad-tag`.
+**Gitea** that `deployment.yaml` now references `demo-bad-tag`.
 
 ### 3. Watch the alert fire (~1–2 min)
 

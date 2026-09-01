@@ -7,8 +7,8 @@ existing Prometheus → Alertmanager → EDA → AAP → Lightspeed/LlamaStack �
 ServiceNow loop returns a **git-fix** Job Template. Argo CD remains the
 reconciler.
 
-This is the VF presenter path (customer UC2). Infrastructure Day-2 scenarios
-remain under `demo/infrastructure/`.
+This is the Customer GitOps use-case presenter path. Infrastructure Day-2
+scenarios remain under `demo/infrastructure/`.
 
 **Prerequisite:** `./setup/09-configure-gitops.sh` (and the rest of
 `./setup/full-setup.sh`). URLs: `./setup/show-credentials.sh`.
@@ -20,7 +20,7 @@ remain under `demo/infrastructure/`.
 | 1 | `scenarios/01-imagepullbackoff-bad-tag/` | `DemoCNFImagePullBackOff` | Bad UBI httpd tag in Git |
 
 - **Good image:** `registry.access.redhat.com/ubi9/httpd-24:latest`
-- **Bad image:** `registry.access.redhat.com/ubi9/httpd-24:vf-demo-bad-tag`
+- **Bad image:** `registry.access.redhat.com/ubi9/httpd-24:demo-bad-tag`
 - **Repo / Argo app:** `cnf-sample`
 - **Namespace:** `cnf-gitops-demo`
 

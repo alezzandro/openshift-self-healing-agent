@@ -1,6 +1,6 @@
 #!/bin/bash
 ###############################################################################
-#  reset-eda.sh  — UC1: Worker Node Failure
+#  reset-eda.sh  — Use Case 1: Worker Node Failure
 #
 #  Restarts the EDA activation to clear the 3-hour throttle for
 #  KubeNodeNotReady, so the same scenario can be triggered again

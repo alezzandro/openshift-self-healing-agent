@@ -1,6 +1,6 @@
 #!/bin/bash
 ###############################################################################
-#  reset-eda.sh  — UC2: Authentication Operator Degraded
+#  reset-eda.sh  — Use Case 2: Authentication Operator Degraded
 #
 #  Restarts the EDA activation to clear the 3-hour throttle for
 #  ClusterOperatorDegraded, so the same scenario can be triggered again

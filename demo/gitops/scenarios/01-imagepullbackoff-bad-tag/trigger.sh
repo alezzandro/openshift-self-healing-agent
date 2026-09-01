@@ -3,7 +3,7 @@ set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../../setup/ensure-authenticated.sh"
 
-BAD_IMAGE="registry.access.redhat.com/ubi9/httpd-24:vf-demo-bad-tag"
+BAD_IMAGE="registry.access.redhat.com/ubi9/httpd-24:demo-bad-tag"
 APP_NS="cnf-gitops-demo"
 ARGO_NS="openshift-gitops"
 ARGO_APP="cnf-sample"
@@ -69,7 +69,7 @@ UPDATE_RESULT=$(
   REPO_NAME="${REPO_NAME}" \
   FILE_PATH="${FILE_PATH}" \
   TARGET_IMAGE="${BAD_IMAGE}" \
-  COMMIT_MSG="demo: set cnf-sample image to vf-demo-bad-tag" \
+  COMMIT_MSG="demo: set cnf-sample image to demo-bad-tag" \
   python3 - <<'PY'
 import base64, json, os, re, ssl, sys, urllib.error, urllib.request
 
