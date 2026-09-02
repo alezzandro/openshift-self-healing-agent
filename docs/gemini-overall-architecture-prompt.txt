@@ -1,0 +1,75 @@
+Create a landscape 16:9 enterprise technical architecture diagram for a Red Hat demo platform. Flat vector style, light background, black/white with red accent only. No photorealism. No official product logos — use clean labeled boxes with product names as text. Minimal text: short titles under boxes, 2–4 words on arrows. Presentation-slide quality, generous whitespace, aligned columns.
+
+Title at top: OpenShift Self-Healing Agent — Overall Architecture
+Subtitle (small): Platform configured for all demo use cases
+
+Show one shared closed-loop platform that serves every use case (worker node failure, authentication operator degraded, node disk pressure, MCP degraded, and GitOps ImagePullBackOff). Do not draw five separate scenarios — draw the global product stack and data flow once.
+
+LAYOUT — four zones:
+
+ZONE A — LEFT: DETECT (OpenShift Observability)
+Labeled boxes stacked or in a small column:
+- Red Hat OpenShift cluster
+- Prometheus
+- Alertmanager
+- Demo PrometheusRule overrides (short for: windows)
+Arrow "fires alert" from Prometheus to Alertmanager
+Arrow "webhook" from Alertmanager to Zone B
+
+ZONE B — CENTER-LEFT: AUTOMATE (Ansible Automation Platform)
+Grouped under title "Red Hat Ansible Automation Platform":
+- EDA Controller (rulebook: cluster alert handler)
+- Automation Controller (self-healing-workflow)
+- Custom Execution Environment
+- Projects / Job Templates / credentials
+Arrow "starts workflow" from EDA to Controller
+From Controller, short spokes labeled:
+- "diagnostics" → OpenShift API
+- "incident" → ServiceNow (Zone D)
+- "playbooks" → Gitea (Zone C)
+- "KB / chat" → OpenShift AI (Zone C)
+- "docs RAG" → OpenShift Lightspeed (Zone C)
+
+ZONE C — CENTER-RIGHT: AI + GIT (configured on-cluster)
+Three product groups side by side:
+
+Group 1 — Red Hat OpenShift AI
+- GPU node / NVIDIA GPU Operator (infra for inference)
+- vLLM model serving (Mistral Small)
+- Llama Stack (chat + vector knowledge base / learning store)
+
+Group 2 — OpenShift Lightspeed
+- OLS API
+- FAISS RAG over OpenShift product docs
+
+Group 3 — Gitea (demo Git)
+- remediation-playbooks repo
+- cnf-sample app repo (GitOps track)
+
+Optional small box under Gitea:
+- Red Hat OpenShift GitOps (Argo CD) → Application cnf-sample → namespace cnf-gitops-demo
+Arrow "sync" between cnf-sample and Argo CD (GitOps path only)
+
+ZONE D — RIGHT / BOTTOM: ITSM (external)
+- ServiceNow developer instance
+Arrows: "create INC / RCA notes" from AAP; return path not required
+
+BOTTOM BAND — LEARNING LOOP (thin full-width strip)
+Left to right with short arrow labels:
+First run: No KB match → AI RCA + playbook → human approve JT → remediate → store resolution
+Second run: KB hit → auto-launch same JT → remediate faster
+
+CALLOUT BOX (corner, small text): Configured from scratch for this demo
+Bullet-style short labels inside (not paragraphs):
+- AAP operator + EDA activation + workflow + EE image
+- RHOAI: DSC, vLLM InferenceService, Llama Stack / OGX serving
+- OpenShift Lightspeed instance
+- Gitea + remediation and sample repos
+- Monitoring Alertmanager route to EDA + PrometheusRule overrides
+- ServiceNow users / API integration
+- OpenShift GitOps operator + cnf-sample Application (GitOps track)
+- Optional MCP servers (ServiceNow / Git) if shown — secondary, not on critical path
+
+FOOTER (tiny): Shared platform for all use cases — only the trigger and alert name change per scenario.
+
+Keep visual hierarchy: Detect → Automate → AI/Git → ITSM, with the learning loop as a second-row emphasis. No cluttered icons; prioritize readable product names.
