@@ -389,11 +389,13 @@ fi
 echo ""
 
 ###############################################################################
-# 3. Clean Gitea: AI-generated playbooks in playbooks/ directory
+# 3. Clean Gitea: generated playbooks in playbooks/ (remediate-* + GitOps golden)
 ###############################################################################
-echo "3. Cleaning Gitea AI-generated playbooks..."
+echo "3. Cleaning Gitea generated remediation playbooks..."
 
 if [ -n "${GITEA_ROUTE}" ] && [ -n "${GITEA_PASS}" ]; then
+  # Delete AI-generated remediate-*.yml and the GitOps golden playbook
+  # (fix-cnf-sample-image.yml) pushed by the DemoCNFImagePullBackOff path.
   GENERATED_FILES=$(curl -sk -u "gitea_admin:${GITEA_PASS}" \
     "https://${GITEA_ROUTE}/api/v1/repos/gitea_admin/remediation-playbooks/contents/playbooks" \
     -H 'Accept: application/json' 2>/dev/null \
@@ -401,7 +403,7 @@ if [ -n "${GITEA_ROUTE}" ] && [ -n "${GITEA_PASS}" ]; then
 import sys, json
 for f in json.load(sys.stdin):
     name = f.get('name', '')
-    if name.startswith('remediate-'):
+    if name.startswith('remediate-') or name == 'fix-cnf-sample-image.yml':
         print(f'{name}|{f[\"sha\"]}')
 " 2>/dev/null || true)
   if [ -n "${GENERATED_FILES}" ]; then
@@ -417,7 +419,7 @@ for f in json.load(sys.stdin):
         || fail "Delete playbooks/${fname} (HTTP ${HTTP})"
     done <<< "${GENERATED_FILES}"
   else
-    skip "No AI-generated playbooks found in Gitea"
+    skip "No generated remediation playbooks found in Gitea"
   fi
   echo "   3b. Syncing EDA rulebook to Gitea (prevents stale-rulebook issues)..."
   LOCAL_RULEBOOK="${SCRIPT_DIR}/../ansible/rulebooks/cluster-alert-handler.yml"
