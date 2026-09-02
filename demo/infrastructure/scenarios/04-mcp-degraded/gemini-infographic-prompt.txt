@@ -1,0 +1,49 @@
+Create a landscape 16:9 companion infographic for a Red Hat OpenShift self-healing demo. Flat vector style, light background, black/white with red accent. No photorealism. No official product logos — labeled panels and icons only. Readable body text in short paragraphs and bullets. Presentation-slide quality.
+
+Title: Use Case 4 — MachineConfigPool Degraded
+Subtitle: Self-healing node configuration render on Red Hat OpenShift
+
+Divide the canvas into five clear panels:
+
+PANEL 1 — PURPOSE AND GOAL
+- Purpose: Apply a conflicting MachineConfig that uses an unsupported Ignition append on a file so the Machine Config Operator cannot render the worker pool.
+- Goal: Detect MCPDegraded, explain render failure, open ServiceNow with RCA, generate remediation that removes the conflicting MachineConfig, restore MCP health, and learn for the next run.
+- Why it matters: Conflicting MachineConfigs are a real Day-2 problem when multiple teams layer node config; this demo fails at render time before any drain or reboot.
+
+PANEL 2 — HOW IT WORKS
+Numbered flow with short lines:
+1. Trigger creates MachineConfig self-healing-demo-conflict with Ignition append (rejected by MCO).
+2. Worker MachineConfigPool becomes RenderDegraded / Degraded — no node updates scheduled.
+3. Prometheus fires MCPDegraded (demo for: ~1 minute); Alertmanager → EDA.
+4. AAP workflow gathers MCP/MCO diagnostics and creates a ServiceNow incident.
+5. Knowledge base lookup in Llama Stack.
+6. AI path: OpenShift Lightspeed RAG + LLM (vLLM on Red Hat OpenShift AI) produce RCA and remediation playbook.
+7. Playbook to Gitea; AAP creates Remediate Job Template.
+8. Heal: delete conflicting MachineConfig; MCP returns healthy.
+9. Store resolution for the learning loop.
+
+PANEL 3 — ALREADY IN PLACE (before demo execution)
+Bullet list:
+- Red Hat OpenShift with Machine Config Operator and worker MachineConfigPool
+- Monitoring + demo PrometheusRule overrides
+- Ansible Automation Platform: EDA + self-healing-workflow
+- Red Hat OpenShift AI (vLLM) + Llama Stack knowledge base
+- OpenShift Lightspeed
+- Gitea remediation-playbooks repository
+- ServiceNow integration
+- Closed loop ready — scenario only injects the conflicting MachineConfig
+
+PANEL 4 — CREATED FROM SCRATCH BY THE AI SOLUTION
+- ServiceNow incident with diagnostics work notes
+- AI RCA describing unsupported append / render degradation
+- New remediation playbook in Gitea (remove conflicting MachineConfig)
+- New AAP Remediate Job Template
+- Knowledge-base entry enabling second-run auto-remediation
+- Generated at incident time — not pre-authored as the demo fix before first failure
+
+PANEL 5 — FIRST RUN VS SECOND RUN
+Two columns:
+First run: No KB match → AI RCA + playbook → human approves JT → conflicting MC removed → MCP healthy → learning stored.
+Second run: Re-trigger after EDA throttle reset → KB hit → known RCA → auto-launch same JT → faster recovery without re-approval.
+
+Footer: AI solution = LLM (vLLM) + Llama Stack knowledge base + OpenShift Lightspeed RAG + Ansible Automation Platform; ServiceNow is the ITSM surface. Emphasize: no node reboot in this failure path.

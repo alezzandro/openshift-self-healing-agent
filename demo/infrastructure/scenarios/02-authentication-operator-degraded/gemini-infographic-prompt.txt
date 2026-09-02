@@ -1,0 +1,49 @@
+Create a landscape 16:9 companion infographic for a Red Hat OpenShift self-healing demo. Flat vector style, light background, black/white with red accent. No photorealism. No official product logos — labeled panels and icons only. Readable body text in short paragraphs and bullets. Presentation-slide quality.
+
+Title: Use Case 2 — Authentication Operator Degraded
+Subtitle: Self-healing Day-2 identity configuration on Red Hat OpenShift
+
+Divide the canvas into five clear panels:
+
+PANEL 1 — PURPOSE AND GOAL
+- Purpose: Simulate a misconfigured HTPasswd identity provider that references a Secret that does not exist, driving the authentication ClusterOperator to Degraded.
+- Goal: Detect ClusterOperatorDegraded, diagnose OAuth/IDP config error, open ServiceNow with RCA, generate remediation, remove the broken IDP, and learn for the next run.
+- Why it matters: Identity provider mistakes are common Day-2 operations issues during SSO and IDP changes; the demo shows operator health can fail without taking down existing sessions.
+
+PANEL 2 — HOW IT WORKS
+Numbered flow with short lines:
+1. Trigger adds a broken HTPasswd IDP pointing at a nonexistent Secret.
+2. After operator debounce, authentication ClusterOperator becomes Degraded.
+3. Prometheus fires ClusterOperatorDegraded (demo for: ~1 minute); Alertmanager → EDA.
+4. AAP workflow gathers diagnostics (operator conditions, OAuth-related context) and creates a ServiceNow incident.
+5. Knowledge base lookup in Llama Stack.
+6. AI path: OpenShift Lightspeed RAG + LLM (vLLM on Red Hat OpenShift AI) produce RCA and remediation playbook.
+7. Playbook to Gitea; AAP creates Remediate Job Template.
+8. Heal: remove broken IDP; authentication operator returns healthy.
+9. Store resolution for the learning loop.
+
+PANEL 3 — ALREADY IN PLACE (before demo execution)
+Bullet list:
+- Red Hat OpenShift with OAuth / authentication operator
+- Monitoring + demo PrometheusRule overrides
+- Ansible Automation Platform: EDA rulebook + self-healing-workflow
+- Red Hat OpenShift AI (vLLM) + Llama Stack knowledge base
+- OpenShift Lightspeed
+- Gitea remediation-playbooks repo
+- ServiceNow integration
+- Closed loop preconfigured — scenario only injects the bad IDP
+
+PANEL 4 — CREATED FROM SCRATCH BY THE AI SOLUTION
+- ServiceNow incident with diagnostics and work notes
+- AI root cause analysis describing missing Secret / IDP misconfiguration
+- New remediation playbook in Gitea (remove broken identity provider)
+- New AAP Remediate Job Template
+- Knowledge-base entry for automatic second-run remediation
+- Not a hand-written fix checked in before the first failure
+
+PANEL 5 — FIRST RUN VS SECOND RUN
+Two columns:
+First run: No KB match → AI RCA + playbook → human approves Job Template → broken IDP removed → operator healthy → learning stored.
+Second run: Re-trigger after EDA throttle reset → KB hit → known RCA → auto-launch same JT → faster recovery without re-approval.
+
+Footer: AI solution = LLM (vLLM) + Llama Stack knowledge base + OpenShift Lightspeed RAG + Ansible Automation Platform; ServiceNow is the ITSM surface. Console and existing sessions remain usable during the incident.

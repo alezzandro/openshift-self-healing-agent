@@ -1,0 +1,52 @@
+Create a landscape 16:9 companion infographic for a Red Hat OpenShift GitOps self-healing demo. Flat vector style, light background, black/white with red accent. No photorealism. No official product logos — labeled panels and icons only. Readable body text in short paragraphs and bullets. Presentation-slide quality.
+
+Title: GitOps Use Case — ImagePullBackOff (Bad Image Tag)
+Subtitle: Post-deploy failure intelligence with git-fix remediation on Red Hat OpenShift GitOps
+
+Divide the canvas into five clear panels:
+
+PANEL 1 — PURPOSE AND GOAL
+- Purpose: Show what happens when GitOps delivers a CNF-like app with a non-existent container image tag (demo-bad-tag), causing ImagePullBackOff after Argo CD sync.
+- Goal: Detect DemoCNFImagePullBackOff, correlate Git + Argo + cluster diagnostics, open ServiceNow with RCA, attach a git-fix remediation Job Template that restores ubi9/httpd-24:latest in Gitea, let Argo CD reconcile health, and demonstrate knowledge-base auto-remediation on the second run.
+- Why it matters: Image pull failures after GitOps sync are realistic CNF/app delivery incidents; healing must fix Git, not bypass GitOps by patching the live Deployment.
+
+PANEL 2 — HOW IT WORKS
+Numbered flow with short lines:
+1. Trigger updates Gitea cnf-sample deployment.yaml to a bad image tag; Argo CD hard-refreshes Application cnf-sample.
+2. Pods in namespace cnf-gitops-demo enter ImagePullBackOff.
+3. Prometheus fires DemoCNFImagePullBackOff (~1 minute for:); Alertmanager → EDA → AAP self-healing-workflow.
+4. Diagnostics include Argo sync/health, live Deployment image, and failing pods; ServiceNow incident is created.
+5. Knowledge base lookup in Llama Stack.
+6. AI path: OpenShift Lightspeed RAG + LLM (vLLM on Red Hat OpenShift AI) produce RCA; golden git-fix playbook restores the known-good image in Git.
+7. AAP exposes Remediate DemoCNFImagePullBackOff Job Template.
+8. JT commits good image to Gitea; Argo CD syncs; pods become Running / Application Healthy.
+9. Store resolution for the learning loop.
+
+PANEL 3 — ALREADY IN PLACE (before demo execution)
+Bullet list:
+- Red Hat OpenShift cluster + monitoring overrides
+- Red Hat OpenShift GitOps (Argo CD) Application cnf-sample
+- Gitea repos: cnf-sample (app source) and remediation-playbooks
+- Known-good baseline image: registry.access.redhat.com/ubi9/httpd-24:latest
+- Namespace cnf-gitops-demo workload target
+- Ansible Automation Platform: EDA rulebook + self-healing-workflow
+- Red Hat OpenShift AI (vLLM) + Llama Stack knowledge base
+- OpenShift Lightspeed
+- ServiceNow integration
+- Closed loop and GitOps delivery path preconfigured — scenario only injects the bad tag
+
+PANEL 4 — CREATED FROM SCRATCH BY THE AI SOLUTION
+Emphasize runtime outputs of AI model + Red Hat products:
+- ServiceNow incident with GitOps-aware diagnostics and work notes
+- AI root cause analysis tying bad Git tag → Argo sync → ImagePullBackOff
+- Remediation playbook / Job Template path that commits the good image to Gitea (git-fix)
+- Knowledge-base stored resolution for automatic second run
+- Not a live kubectl/oc patch of the Deployment; Argo remains the reconciler
+- First-run human approval of the Remediate JT; artifacts are produced by the closed loop when the alert fires
+
+PANEL 5 — FIRST RUN VS SECOND RUN
+Two columns:
+First run: No KB match → AI RCA + git-fix JT → operator reviews and launches Remediate DemoCNFImagePullBackOff → Gitea good image → Argo sync → Healthy → learning stored.
+Second run: cleanup/reset-eda then trigger again → KB hit → known RCA → same JT auto-launches → Git + Argo heal without a second approval.
+
+Footer: AI solution = LLM (vLLM) + Llama Stack knowledge base + OpenShift Lightspeed RAG + Ansible Automation Platform; delivery plane = OpenShift GitOps + Gitea; ServiceNow is the ITSM surface. Customer-facing wording only — no vendor-confidential labels.

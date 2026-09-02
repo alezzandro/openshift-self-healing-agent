@@ -1,0 +1,50 @@
+Create a landscape 16:9 companion infographic for a Red Hat OpenShift self-healing demo. Flat vector style, light background, black/white with red accent. No photorealism. No official product logos — labeled panels and icons only. Readable body text in short paragraphs and bullets. Presentation-slide quality.
+
+Title: Use Case 1 — Worker Node Failure
+Subtitle: Self-healing compute capacity on Red Hat OpenShift
+
+Divide the canvas into five clear panels:
+
+PANEL 1 — PURPOSE AND GOAL
+- Purpose: Simulate a worker node losing its kubelet so the node becomes NotReady and workloads cannot schedule there.
+- Goal: Detect the failure, open an ITSM incident with root cause analysis, produce a remediation playbook, restore the node to Ready, and store the resolution so the next identical alert remediates automatically.
+- Why it matters: Node failures are the most fundamental infrastructure incident in Kubernetes/OpenShift clusters.
+
+PANEL 2 — HOW IT WORKS
+Numbered flow with short lines:
+1. Trigger cordons, drains, and stops kubelet on a safe worker node.
+2. Prometheus fires KubeNodeNotReady (demo for: ~1 minute); Alertmanager webhooks Event-Driven Ansible.
+3. AAP workflow gathers cluster diagnostics and creates a ServiceNow incident.
+4. Knowledge base lookup in Llama Stack vector store.
+5. AI path: OpenShift Lightspeed RAG (product docs) + LLM via vLLM on Red Hat OpenShift AI produce RCA and a remediation playbook.
+6. Playbook is pushed to Gitea; AAP creates a Remediate Job Template.
+7. Heal: restart kubelet and uncordon; node returns Ready.
+8. Resolution is stored for the learning loop.
+
+PANEL 3 — ALREADY IN PLACE (before demo execution)
+Bullet list:
+- Red Hat OpenShift cluster with monitoring (Prometheus, Alertmanager)
+- Demo PrometheusRule overrides (short alert for: windows)
+- Red Hat Ansible Automation Platform: EDA rulebook + self-healing-workflow
+- Custom execution environment and OpenShift credentials
+- Red Hat OpenShift AI: model serving (vLLM) + Llama Stack / vector knowledge base
+- OpenShift Lightspeed for documentation-grounded guidance
+- Gitea remediation-playbooks repository
+- ServiceNow developer instance integration
+- Prewired closed loop — no platform install during the scenario run
+
+PANEL 4 — CREATED FROM SCRATCH BY THE AI SOLUTION
+Emphasize these are produced at runtime by AI model + Red Hat products:
+- ServiceNow incident with diagnostics work notes and attachments
+- AI-written root cause analysis text on the incident
+- New Ansible remediation playbook committed to Gitea
+- New AAP Job Template (Remediate …) bound to that playbook
+- Knowledge-base embedding / stored resolution for future matches
+- Not pre-authored for this specific node failure before the first run
+
+PANEL 5 — FIRST RUN VS SECOND RUN
+Two columns:
+First run: No knowledge-base match → full AI RCA + playbook generation → human reviews and launches the Job Template → node healed → learning stored.
+Second run: Same alert after EDA throttle reset → knowledge-base hit → known RCA posted to ServiceNow → same Job Template auto-launches → faster heal without a second approval.
+
+Footer: AI solution = LLM (vLLM) + Llama Stack knowledge base + OpenShift Lightspeed RAG + Ansible Automation Platform orchestration; ServiceNow is the ITSM surface.

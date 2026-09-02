@@ -1,0 +1,44 @@
+Create a landscape 16:9 enterprise technical architecture diagram. Flat vector style, light background, black/white with red accent only. No photorealism. No official product logos — use clean labeled boxes with product names as text. Minimal text: short titles under boxes, 2–4 words on arrows.
+
+Title at top: OpenShift Self-Healing — GitOps ImagePullBackOff
+
+Layout in three horizontal bands:
+
+BAND 1 — TRIGGER AND GITOPS DELIVERY (left to right)
+- Box: Trigger script
+- Arrow "bad tag": commit demo-bad-tag to Gitea cnf-sample
+- Box: Gitea (cnf-sample source of truth)
+- Arrow "sync": Red Hat OpenShift GitOps (Argo CD) Application cnf-sample
+- Box: Pods in cnf-gitops-demo → ImagePullBackOff
+- Arrow "fires": Alert DemoCNFImagePullBackOff
+- Box: Prometheus → arrow "webhook" → Alertmanager
+
+BAND 2 — CLOSED LOOP (shared platform, left to right then down)
+- Alertmanager → arrow "routes" → EDA (Event-Driven Ansible)
+- EDA → arrow "starts" → AAP Workflow (self-healing-workflow)
+- AAP Workflow branches to:
+  - Gather diagnostics (Argo app, Deployment image, failing pods)
+  - Create ServiceNow incident
+  - Check knowledge base
+- AI path boxes (grouped): OpenShift Lightspeed (RAG) + Llama Stack + vLLM (Red Hat OpenShift AI)
+- Arrow "RCA + git-fix" → Golden / remediation playbook in Gitea
+- Arrow "creates" → Remediate DemoCNFImagePullBackOff Job Template
+- Important callout box: Never live-patch Deployment — Git remains source of truth
+
+BAND 3 — TWO RUNS (side by side, equal visual weight)
+LEFT — First run
+- Label: No KB match
+- Arrow "human approve" → Launch Remediate JT
+- Arrow "good image": commit ubi9/httpd-24:latest to Gitea
+- Arrow "reconcile": Argo CD sync
+- Resolution box: Pods Running / App Healthy
+
+RIGHT — Second run
+- Label: KB hit
+- Arrow "auto-remediate" → Same Remediate JT (no approval)
+- Arrow "git-fix + sync": Gitea then Argo CD
+- Resolution box: Healed without second approval
+
+Footer note in tiny text: Red Hat OpenShift + OpenShift GitOps + Ansible Automation Platform + OpenShift AI + Lightspeed + ServiceNow + Gitea
+
+Keep whitespace generous, aligned columns, professional presentation-slide quality.

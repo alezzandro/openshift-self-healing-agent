@@ -1,0 +1,49 @@
+Create a landscape 16:9 companion infographic for a Red Hat OpenShift self-healing demo. Flat vector style, light background, black/white with red accent. No photorealism. No official product logos — labeled panels and icons only. Readable body text in short paragraphs and bullets. Presentation-slide quality.
+
+Title: Use Case 3 — Node Disk Pressure
+Subtitle: Self-healing node filesystem capacity on Red Hat OpenShift
+
+Divide the canvas into five clear panels:
+
+PANEL 1 — PURPOSE AND GOAL
+- Purpose: Fill a worker node filesystem past eviction thresholds so DiskPressure appears and scheduling/eviction behavior degrades.
+- Goal: Detect NodeFilesystemSpaceFillingUp, diagnose disk pressure, open ServiceNow with RCA, generate remediation that frees space, clear pressure, and learn for recurrence.
+- Why it matters: Disk pressure is one of the most frequent production node issues (images, logs, emptyDir, orphaned kubelet data).
+
+PANEL 2 — HOW IT WORKS
+Numbered flow with short lines:
+1. Trigger writes a large file (~85% capacity) to /var/tmp on a safe worker via oc debug.
+2. Kubelet sets DiskPressure; Prometheus fires NodeFilesystemSpaceFillingUp (demo for: ~1 minute).
+3. Alertmanager webhooks EDA; AAP self-healing-workflow starts.
+4. Diagnostics capture node conditions and filesystem context; ServiceNow incident is created.
+5. Knowledge base lookup in Llama Stack.
+6. AI path: OpenShift Lightspeed RAG + LLM (vLLM on Red Hat OpenShift AI) produce RCA and remediation playbook.
+7. Playbook to Gitea; AAP creates Remediate Job Template.
+8. Heal: remove the fill file / reclaim space; DiskPressure clears.
+9. Store resolution for the learning loop.
+
+PANEL 3 — ALREADY IN PLACE (before demo execution)
+Bullet list:
+- Red Hat OpenShift workers with kubelet eviction thresholds
+- Monitoring + demo PrometheusRule overrides
+- Ansible Automation Platform: EDA + self-healing-workflow
+- Red Hat OpenShift AI (vLLM) + Llama Stack knowledge base
+- OpenShift Lightspeed
+- Gitea remediation-playbooks repository
+- ServiceNow integration
+- Closed loop ready — scenario only injects disk fill
+
+PANEL 4 — CREATED FROM SCRATCH BY THE AI SOLUTION
+- ServiceNow incident with diagnostics work notes
+- AI RCA explaining filesystem space filling / DiskPressure
+- New remediation playbook in Gitea (reclaim space / remove fill artifact)
+- New AAP Remediate Job Template
+- Knowledge-base embedding for second-run auto-remediation
+- Runtime AI output — not a pre-staged fix for this alert before first run
+
+PANEL 5 — FIRST RUN VS SECOND RUN
+Two columns:
+First run: No KB match → AI RCA + playbook → human approves JT → disk freed → pressure cleared → learning stored.
+Second run: Re-trigger after EDA throttle reset → KB hit → known RCA → auto-launch same JT → faster recovery without re-approval.
+
+Footer: AI solution = LLM (vLLM) + Llama Stack knowledge base + OpenShift Lightspeed RAG + Ansible Automation Platform; ServiceNow is the ITSM surface.

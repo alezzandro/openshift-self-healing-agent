@@ -1,0 +1,39 @@
+Create a landscape 16:9 enterprise technical architecture diagram. Flat vector style, light background, black/white with red accent only. No photorealism. No official product logos — use clean labeled boxes with product names as text. Minimal text: short titles under boxes, 2–4 words on arrows.
+
+Title at top: OpenShift Self-Healing — Node Disk Pressure
+
+Layout in three horizontal bands:
+
+BAND 1 — TRIGGER (left to right)
+- Box: Trigger script
+- Arrow "fill disk": large file under /var/tmp on worker
+- Box: Node DiskPressure
+- Arrow "fires": Alert NodeFilesystemSpaceFillingUp
+- Box: Prometheus
+- Arrow "webhook": Alertmanager
+
+BAND 2 — CLOSED LOOP (shared platform, left to right then down)
+- Alertmanager → arrow "routes" → EDA (Event-Driven Ansible)
+- EDA → arrow "starts" → AAP Workflow (self-healing-workflow)
+- AAP Workflow branches to:
+  - Gather diagnostics (node conditions, filesystem)
+  - Create ServiceNow incident
+  - Check knowledge base
+- AI path boxes (grouped): OpenShift Lightspeed (RAG) + Llama Stack + vLLM (Red Hat OpenShift AI)
+- Arrow "RCA + playbook" → Gitea remediation repo
+- Arrow "creates" → Remediate Job Template (AAP Controller)
+
+BAND 3 — TWO RUNS (side by side, equal visual weight)
+LEFT — First run
+- Label: No KB match
+- Arrow "human approve" → Launch Remediate JT
+- Resolution box: delete fill file; clear DiskPressure
+
+RIGHT — Second run
+- Label: KB hit
+- Arrow "auto-remediate" → Same Remediate JT (no approval)
+- Resolution box: disk capacity restored via learned playbook
+
+Footer note in tiny text: Red Hat OpenShift + Ansible Automation Platform + OpenShift AI + Lightspeed + ServiceNow + Gitea
+
+Keep whitespace generous, aligned columns, professional presentation-slide quality.
